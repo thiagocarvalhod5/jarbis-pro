@@ -1,10 +1,225 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const fmt  = v => (v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
 const fmtN = v => (v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 const hoje = () => new Date().toLocaleDateString("pt-BR");
 const uid  = () => Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
+// ── SUPABASE CONFIG ───────────────────────────────────────────
+const SUPA_URL  = "https://hrqhqqakvkdkapfijhij.supabase.co";
+const SUPA_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhycWhxcWFrdmtka2FwZmlqaGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwMDc1OTYsImV4cCI6MjA5MzU4MzU5Nn0.5YM_CUIuaSmb4lZngDXqJdEuPbGF53F5Qc9nbXLkk2k";
+const HOTMART_URL = "https://hotmart.com/produto/jarbis-pro";
+
+const supa = {
+  async query(table, filters={}) {
+    let url = SUPA_URL+"/rest/v1/"+table+"?select=*";
+    Object.entries(filters).forEach(([k,v])=>{ url+=`&${k}=eq.${encodeURIComponent(v)}`; });
+    const r = await fetch(url,{headers:{"apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY}});
+    return r.json();
+  },
+  async insert(table, data) {
+    const r = await fetch(SUPA_URL+"/rest/v1/"+table,{
+      method:"POST",
+      headers:{"apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Content-Type":"application/json","Prefer":"return=representation"},
+      body:JSON.stringify(data)
+    });
+    return r.json();
+  },
+  async update(table, id, data) {
+    const r = await fetch(SUPA_URL+"/rest/v1/"+table+"?id=eq."+id,{
+      method:"PATCH",
+      headers:{"apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Content-Type":"application/json","Prefer":"return=representation"},
+      body:JSON.stringify(data)
+    });
+    return r.json();
+  }
+};
+
+async function fazerLogin(email, senha) {
+  try {
+    const rows = await supa.query("usuarios",{email:email.toLowerCase().trim()});
+    if(!rows||rows.error||rows.length===0) return {erro:"E-mail não encontrado."};
+    const u = rows[0];
+    if(u.senha !== senha) return {erro:"Senha incorreta."};
+    if(u.expira_em && new Date() > new Date(u.expira_em)) return {erro:"Assinatura expirada.",expirado:true};
+    return {usuario:u};
+  } catch(e) { return {erro:"Erro de conexão. Tente novamente."}; }
+}
+
+async function fazerCadastro(nome, email, senha) {
+  try {
+    const existe = await supa.query("usuarios",{email:email.toLowerCase().trim()});
+    if(existe&&!existe.error&&existe.length>0) return {erro:"E-mail já cadastrado."};
+    const rows = await supa.insert("usuarios",{nome,email:email.toLowerCase().trim(),senha,plano:"gratis",assinatura_ativa:false});
+    if(!rows||rows.error) return {erro:"Erro ao criar conta."};
+    return {usuario:Array.isArray(rows)?rows[0]:rows};
+  } catch(e) { return {erro:"Erro de conexão. Tente novamente."}; }
+}
+
+// ── SISTEMA DE ACESSO ─────────────────────────────────────────
+// Usuários cadastrados (você adiciona aqui quando alguém pagar)
+// Formato: { email, senha, nome, plano: "gratis" | "pro", expira: "DD/MM/AAAA" | null }
+const USUARIOS = [
+  { email:"admin@jarbispro.com",   senha:"jarbis@2025",   nome:"Admin",           plano:"pro",    expira:null },
+  { email:"demo@eletricista.com",  senha:"demo123",        nome:"Eletricista Demo", plano:"gratis", expira:null },
+  // Adicione seus clientes aqui após o pagamento:
+  // { email:"cliente@email.com", senha:"senhaGerada", nome:"Nome Cliente", plano:"pro", expira:"05/06/2025" },
+];
+
+// Senha mestra PRO (para ativar plano PRO após pagamento)
+const SENHA_PRO_MENSAL = "JARBIS-PRO-MAI25"; // Troque todo mês
+
+function verificarLogin(email, senha) {
+  const u = USUARIOS.find(u => u.email.toLowerCase() === email.toLowerCase() && u.senha === senha);
+  if (!u) return null;
+  // Verifica se expirou
+  if (u.expira) {
+    const [d,m,a] = u.expira.split("/").map(Number);
+    if (new Date() > new Date(a, m-1, d)) return { ...u, plano:"expirado" };
+  }
+  return u;
+}
+
+function ativarPRO(codigo) {
+  return codigo.trim().toUpperCase() === SENHA_PRO_MENSAL;
+}
+
+// ── TELA DE LOGIN ─────────────────────────────────────────────
+function TelaLogin({ onLogin }) {
+  const [email,  setEmail]  = useState("");
+  const [senha,  setSenha]  = useState("");
+  const [nome,   setNome]   = useState("");
+  const [erro,   setErro]   = useState("");
+  const [load,   setLoad]   = useState(false);
+  const [modo,   setModo]   = useState("login");
+
+  async function entrar(e) {
+    e.preventDefault();
+    if (!email||!senha) { setErro("Preencha e-mail e senha."); return; }
+    setLoad(true); setErro("");
+    const res = await fazerLogin(email, senha);
+    setLoad(false);
+    if (res.erro) { setErro(res.erro); return; }
+    onLogin(res.usuario);
+  }
+
+  async function cadastrar(e) {
+    e.preventDefault();
+    if (!nome||!email||!senha) { setErro("Preencha todos os campos."); return; }
+    if (senha.length<6) { setErro("Senha deve ter pelo menos 6 caracteres."); return; }
+    setLoad(true); setErro("");
+    const res = await fazerCadastro(nome, email, senha);
+    setLoad(false);
+    if (res.erro) { setErro(res.erro); return; }
+    onLogin(res.usuario);
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0;}
+        input{font-family:'DM Sans',sans-serif;outline:none;}
+        button{font-family:'DM Sans',sans-serif;cursor:pointer;}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:translateY(0);}}
+        @keyframes spin{to{transform:rotate(360deg);}}
+        @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+        .linp{width:100%;background:#1a2035;border:1.5px solid rgba(255,255,255,.08);color:#e2e8f0;border-radius:12px;padding:14px 16px;font-size:16px;transition:border .2s;}
+        .linp:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1);}
+      `}</style>
+
+      {/* Logo */}
+      <div style={{textAlign:"center",marginBottom:32,animation:"fadeUp .5s ease"}}>
+        <div style={{width:64,height:64,borderRadius:18,background:"linear-gradient(135deg,#6366f1,#818cf8)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,margin:"0 auto 14px",boxShadow:"0 8px 32px rgba(99,102,241,.4)"}}>⚡</div>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:800,background:"linear-gradient(135deg,#6366f1,#818cf8)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:2}}>JARBIS PRO</div>
+        <div style={{fontSize:13,color:"#475569",marginTop:4}}>Sistema do Eletricista Profissional</div>
+      </div>
+
+      {/* Card */}
+      <div style={{width:"100%",maxWidth:400,background:"#111827",border:"1px solid rgba(255,255,255,.07)",borderRadius:20,padding:28,animation:"fadeUp .5s ease .1s both",position:"relative",overflow:"hidden"}}>
+        <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,rgba(99,102,241,.5),transparent)"}}/>
+
+        {/* Tabs login/cadastro */}
+        <div style={{display:"flex",background:"#1a2035",borderRadius:12,padding:4,marginBottom:24,gap:4}}>
+          {[{id:"login",l:"Entrar"},{id:"cadastro",l:"Criar conta grátis"}].map(t=>(
+            <button key={t.id} onClick={()=>{setModo(t.id);setErro("");}} style={{flex:1,padding:"10px",borderRadius:9,border:"none",background:modo===t.id?"linear-gradient(135deg,#6366f1,#818cf8)":"transparent",color:modo===t.id?"#fff":"#475569",fontSize:14,fontWeight:700,transition:"all .2s"}}>
+              {t.l}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={modo==="login"?entrar:cadastrar} style={{display:"flex",flexDirection:"column",gap:14}}>
+          {modo==="cadastro"&&(
+            <div>
+              <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:6,letterSpacing:.5,textTransform:"uppercase"}}>Seu nome</div>
+              <input className="linp" value={nome} onChange={e=>setNome(e.target.value)} placeholder="Ex: João Silva"/>
+            </div>
+          )}
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:6,letterSpacing:.5,textTransform:"uppercase"}}>E-mail</div>
+            <input className="linp" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@email.com"/>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:6,letterSpacing:.5,textTransform:"uppercase"}}>Senha</div>
+            <input className="linp" type="password" value={senha} onChange={e=>setSenha(e.target.value)} placeholder="••••••••"/>
+          </div>
+
+          {erro&&<div style={{background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.3)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#ef4444",fontWeight:600}}>⚠️ {erro}</div>}
+
+          <button type="submit" style={{width:"100%",background:"linear-gradient(135deg,#6366f1,#818cf8)",border:"none",color:"#fff",borderRadius:12,padding:"15px",fontSize:16,fontWeight:800,marginTop:4,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+            {load&&<span style={{width:18,height:18,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 1s linear infinite",display:"inline-block"}}/>}
+            {load?"Aguarde...":(modo==="login"?"⚡ Entrar":"🚀 Criar conta grátis")}
+          </button>
+        </form>
+
+        {modo==="login"&&<div style={{textAlign:"center",marginTop:16,fontSize:13,color:"#334155"}}>
+          Não tem conta? <button onClick={()=>{setModo("cadastro");setErro("");}} style={{background:"none",border:"none",color:"#6366f1",fontWeight:700,fontSize:13,cursor:"pointer"}}>Criar grátis</button>
+        </div>}
+
+        {modo==="cadastro"&&<div style={{marginTop:16,background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.15)",borderRadius:12,padding:"12px 14px"}}>
+          <div style={{fontSize:13,color:"#64748b",lineHeight:1.6}}>
+            ✅ <b style={{color:"#e2e8f0"}}>Grátis:</b> Prospecção com até 5 empresas<br/>
+            🔒 <b style={{color:"#6366f1"}}>PRO R$47/mês:</b> OS, CRM, Financeiro, PDF ilimitados
+          </div>
+        </div>}
+      </div>
+
+      <div style={{marginTop:20,fontSize:12,color:"#1e3a5f",textAlign:"center"}}>
+        Ao continuar você concorda com os Termos de Uso
+      </div>
+    </div>
+  );
+}
+
+// ── TELA UPGRADE PRO ──────────────────────────────────────────
+function TelaUpgrade({ onClose }) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.88)",zIndex:990,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+      <div style={{background:"#111827",border:"1px solid rgba(99,102,241,.2)",borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 20px 40px"}} onClick={e=>e.stopPropagation()}>
+        <div style={{width:44,height:5,background:"rgba(255,255,255,.15)",borderRadius:3,margin:"0 auto 20px"}}/>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:40,marginBottom:8}}>🔒</div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800,marginBottom:6}}>Recurso Exclusivo PRO</div>
+          <div style={{fontSize:14,color:"#64748b"}}>Assine o JARBIS PRO para desbloquear tudo</div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+          {["✅ OS e Orçamentos ilimitados","✅ Geração de PDF profissional","✅ CRM completo","✅ Controle financeiro com gráficos","✅ Contratos digitais","✅ Prospecção ilimitada"].map(i=>(
+            <div key={i} style={{fontSize:14,color:"#94a3b8"}}>{i}</div>
+          ))}
+        </div>
+        <a href={HOTMART_URL} target="_blank" rel="noreferrer"
+          style={{display:"block",width:"100%",background:"linear-gradient(135deg,#6366f1,#818cf8)",color:"#fff",borderRadius:13,padding:"17px",fontSize:17,fontWeight:800,textAlign:"center",textDecoration:"none",marginBottom:10}}>
+          💳 Assinar por R$ 47/mês
+        </a>
+        <div style={{fontSize:12,color:"#475569",textAlign:"center",marginBottom:12}}>PIX · Cartão · Boleto · Parcelado</div>
+        <button onClick={onClose} style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",color:"#475569",borderRadius:11,padding:"13px",fontSize:14,fontWeight:600,cursor:"pointer"}}>
+          Continuar na versão grátis
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const STATUS_OS = {
   orcamento:{ l:"Orçamento",    c:"#fb923c" },
@@ -155,6 +370,24 @@ button{font-family:'DM Sans',sans-serif;cursor:pointer;}
 `;
 
 export default function App() {
+  const [usuario,    setUsuario]    = useState(null);
+  const [showUpgrade,setShowUpgrade]= useState(false);
+  const isPro    = usuario?.plano === "pro";
+  const isGratis = usuario?.plano === "gratis";
+  function logout() { setUsuario(null); }
+  function exigirPro() { if (!isPro) { setShowUpgrade(true); return false; } return true; }
+  if (!usuario) return <TelaLogin onLogin={setUsuario}/>;
+  if (usuario.plano === "expirado") return (
+    <div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{textAlign:"center",maxWidth:380}}>
+        <div style={{fontSize:52,marginBottom:16}}>⏰</div>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:8}}>Assinatura Expirada</div>
+        <div style={{fontSize:15,color:"#64748b",marginBottom:24}}>Renove seu plano para continuar usando o JARBIS PRO.</div>
+        <a href={HOTMART_URL} target="_blank" rel="noreferrer" style={{display:"block",background:"linear-gradient(135deg,#6366f1,#818cf8)",color:"#fff",borderRadius:13,padding:"16px",fontSize:16,fontWeight:800,textDecoration:"none",marginBottom:12}}>💳 Renovar Assinatura</a>
+        <button onClick={logout} style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",color:"#475569",borderRadius:11,padding:"13px",fontSize:14,fontWeight:600,cursor:"pointer"}}>Sair</button>
+      </div>
+    </div>
+  );
   const [tab,setTab] = useState("dash");
   const [emp,setEmp] = useState({nome:"",cnpj:"",crea:"",tel:"",email:"",endereco:"",pix:""});
   const [clientes,setClientes] = useState([]);
@@ -228,7 +461,7 @@ export default function App() {
   }
   function iniciarScan() {
     if(pScan)return; setPDone(false); setPPct(0); setPEmps([]); setPScan(true);
-    let p=0; pRef.current=setInterval(()=>{ p+=Math.random()*4+2; if(p>=100){clearInterval(pRef.current);p=100;setPEmps(gerarEmps());setPScan(false);setPDone(true);} setPPct(Math.min(100,p)); },70);
+    let p=0; pRef.current=setInterval(()=>{ p+=Math.random()*4+2; if(p>=100){clearInterval(pRef.current);p=100;let res=gerarEmps();if(!isPro)res=res.slice(0,5);setPEmps(res);setPScan(false);setPDone(true);} setPPct(Math.min(100,p)); },70);
   }
   function enviarWA(e) {
     const txt=msgP.replace(/{NOME}/g,emp.nome||"Eletricista").replace(/{EMPRESA}/g,e.nome).replace(/{ANOS}/g,"10");
@@ -246,19 +479,36 @@ export default function App() {
 
       {toast&&<div style={{position:"fixed",top:14,left:"50%",transform:"translateX(-50%)",zIndex:9999,background:toast.t==="w"?"#1a0800":"#081a08",border:"2px solid "+(toast.t==="w"?"#f59e0b":"#10b981"),borderRadius:12,padding:"11px 20px",fontSize:14,color:toast.t==="w"?"#f59e0b":"#4ade80",fontWeight:700,whiteSpace:"nowrap",boxShadow:"0 8px 32px rgba(0,0,0,.7)",animation:"fadeUp .3s ease"}}>{toast.t==="w"?"⚠️ ":"✅ "}{toast.m}</div>}
 
+      {showUpgrade&&<TelaUpgrade onClose={()=>setShowUpgrade(false)}/> }
+
       {/* HEADER */}
       <div style={{background:"#111827",borderBottom:"1px solid rgba(255,255,255,.06)",padding:"12px 16px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:200}}>
         <div style={{width:38,height:38,borderRadius:11,background:"linear-gradient(135deg,#6366f1,#818cf8)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>⚡</div>
-        <div><div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:800,letterSpacing:.5}}>JARBIS PRO</div><div style={{fontSize:11,color:"#475569"}}>Sistema do Eletricista</div></div>
-        <div style={{marginLeft:"auto",display:"flex",gap:8}}>
-          <button className="btn btn-p" onClick={()=>abrirOS("orcamento")} style={{fontSize:12,padding:"8px 12px"}}>+ OS</button>
-          <button className="btn btn-o" onClick={()=>setModalFin(true)} style={{fontSize:12,padding:"8px 12px"}}>+ R$</button>
+        <div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:800,letterSpacing:.5}}>JARBIS PRO</div>
+          <div style={{fontSize:11,color:"#475569"}}>Olá, {usuario.nome.split(" ")[0]}!</div>
+        </div>
+        {/* Badge plano */}
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
+          {isPro
+            ? <span style={{background:"rgba(99,102,241,.15)",border:"1px solid rgba(99,102,241,.3)",color:"#818cf8",borderRadius:8,padding:"4px 10px",fontSize:11,fontWeight:700}}>⚡ PRO</span>
+            : <button onClick={()=>setShowUpgrade(true)} style={{background:"linear-gradient(135deg,#6366f1,#818cf8)",border:"none",color:"#fff",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>🔒 Seja PRO</button>
+          }
+          <button onClick={logout} style={{width:34,height:34,borderRadius:9,border:"1px solid rgba(255,255,255,.07)",background:"rgba(255,255,255,.03)",color:"#64748b",fontSize:15,display:"flex",alignItems:"center",justifyContent:"center"}}>🚪</button>
         </div>
       </div>
 
       {/* TABS */}
       <div className="tabs">
-        {TABS.map(t=><button key={t.id} className={"tb"+(tab===t.id?" on":"")} onClick={()=>setTab(t.id)}><span className="em">{t.em}</span><span className="lb">{t.lb}</span></button>)}
+        {TABS.map(t=>(
+          <button key={t.id} className={"tb"+(tab===t.id?" on":"")} onClick={()=>{
+            if(["os","fin","cfg"].includes(t.id)&&!isPro){ setShowUpgrade(true); return; }
+            setTab(t.id);
+          }}>
+            <span className="em">{t.em}{["os","fin","cfg"].includes(t.id)&&!isPro?"🔒":""}</span>
+            <span className="lb">{t.lb}</span>
+          </button>
+        ))}
       </div>
 
       <div style={{maxWidth:620,margin:"0 auto",padding:"16px",display:"flex",flexDirection:"column",gap:14}}>
@@ -351,6 +601,16 @@ export default function App() {
 
           {pDone&&pEmps.length>0&&<>
             <div className="g3">{[{l:"Encontradas",v:pEmps.length,c:"#6366f1"},{l:"Enviadas",v:pEmps.filter(e=>e.enviado).length,c:"#4ade80"},{l:"Pendentes",v:pEmps.filter(e=>!e.enviado).length,c:"#fb923c"}].map(s=><div key={s.l} className="card" style={{padding:"12px",textAlign:"center"}}><div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,color:s.c}}>{s.v}</div><div style={{fontSize:11,color:"#475569",fontWeight:600,marginTop:2}}>{s.l}</div></div>)}</div>
+
+            {/* Banner limite grátis */}
+            {!isPro&&<div style={{background:"linear-gradient(135deg,rgba(99,102,241,.12),rgba(129,140,248,.08))",border:"2px solid rgba(99,102,241,.3)",borderRadius:14,padding:"16px 18px",display:"flex",alignItems:"center",gap:14}}>
+              <span style={{fontSize:28,flexShrink:0}}>🔒</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:15,fontWeight:700,color:"#818cf8",marginBottom:3}}>Versão Grátis — 5 empresas</div>
+                <div style={{fontSize:13,color:"#64748b"}}>Assine o PRO e encontre até 15 empresas por busca, ilimitado!</div>
+              </div>
+              <button onClick={()=>setShowUpgrade(true)} style={{background:"linear-gradient(135deg,#6366f1,#818cf8)",border:"none",color:"#fff",borderRadius:10,padding:"10px 14px",fontSize:13,fontWeight:700,cursor:"pointer",flexShrink:0}}>Ver PRO</button>
+            </div>}
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {pEmps.map((e,i)=>{const seg=SEGS_P.find(s=>s.id===e.segmento);return(
                 <div key={e.id} className="card" style={{padding:14,animation:"fadeUp .3s ease both",animationDelay:i*.03+"s",border:"1px solid "+(e.enviado?"rgba(74,222,128,.2)":"rgba(255,255,255,.07)"),background:e.enviado?"rgba(74,222,128,.025)":"#111827"}}>
