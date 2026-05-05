@@ -389,45 +389,28 @@ button{font-family:'DM Sans',sans-serif;cursor:pointer;}
 `;
 
 export default function App() {
+  // ── TODOS OS HOOKS PRIMEIRO ───────────────────────────────
   const [usuario,    setUsuario]    = useState(null);
   const [showUpgrade,setShowUpgrade]= useState(false);
-  const isPro    = usuario?.plano === "pro";
-  const isGratis = usuario?.plano === "gratis";
-  function logout() { setUsuario(null); }
-  function exigirPro() { if (!isPro) { setShowUpgrade(true); return false; } return true; }
-  if (!usuario) return <TelaLogin onLogin={setUsuario}/>;
-  if (usuario.plano === "expirado") return (
-    <div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
-      <div style={{textAlign:"center",maxWidth:380}}>
-        <div style={{fontSize:52,marginBottom:16}}>⏰</div>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:8}}>Assinatura Expirada</div>
-        <div style={{fontSize:15,color:"#64748b",marginBottom:24}}>Renove seu plano para continuar usando o JARBIS PRO.</div>
-        <a href={HOTMART_URL} target="_blank" rel="noreferrer" style={{display:"block",background:"linear-gradient(135deg,#6366f1,#818cf8)",color:"#fff",borderRadius:13,padding:"16px",fontSize:16,fontWeight:800,textDecoration:"none",marginBottom:12}}>💳 Renovar Assinatura</a>
-        <button onClick={logout} style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",color:"#475569",borderRadius:11,padding:"13px",fontSize:14,fontWeight:600,cursor:"pointer"}}>Sair</button>
-      </div>
-    </div>
-  );
-  const [tab,setTab] = useState("dash");
-  const [emp,setEmp] = useState({nome:"",cnpj:"",crea:"",tel:"",email:"",endereco:"",pix:""});
-  const [clientes,setClientes] = useState([]);
-  const [servicos,setServicos] = useState([
+  const [tab,        setTab]        = useState("dash");
+  const [emp,        setEmp]        = useState({nome:"",cnpj:"",crea:"",tel:"",email:"",endereco:"",pix:""});
+  const [clientes,   setClientes]   = useState([]);
+  const [servicos,   setServicos]   = useState([
     {id:"p1",nome:"Ponto de tomada 20A",preco:85},{id:"p2",nome:"Ponto de iluminação",preco:70},
     {id:"p3",nome:"Ponto de chuveiro",preco:120},{id:"p4",nome:"Quadro de distribuição",preco:650},
     {id:"p5",nome:"Ar-condicionado split",preco:320},{id:"p6",nome:"Laudo elétrico + ART",preco:850},
     {id:"p7",nome:"SPDA / Para-raios",preco:1200},{id:"p8",nome:"Aterramento",preco:480},
   ]);
-  const [ordens,setOrdens]     = useState([]);
-  const [financeiro,setFin]    = useState([]);
-  const [contatos,setContatos] = useState([]);
-
-  const [modalOS,  setModalOS]  = useState(false);
-  const [editOSId, setEditOSId] = useState(null);
-  const [formOS,   setFormOS]   = useState({});
-  const [itensOS,  setItensOS]  = useState([]);
+  const [ordens,    setOrdens]    = useState([]);
+  const [financeiro,setFin]       = useState([]);
+  const [contatos,  setContatos]  = useState([]);
+  const [modalOS,   setModalOS]   = useState(false);
+  const [editOSId,  setEditOSId]  = useState(null);
+  const [formOS,    setFormOS]    = useState({});
+  const [itensOS,   setItensOS]   = useState([]);
   const [iN,setIN] = useState(""); const [iV,setIV] = useState(""); const [iQ,setIQ] = useState("1");
-
-  const [modalCli, setModalCli] = useState(false);
-  const [formCli,  setFormCli]  = useState({});
+  const [modalCli,  setModalCli]  = useState(false);
+  const [formCli,   setFormCli]   = useState({});
   const [modalFin, setModalFin] = useState(false);
   const [formFin,  setFormFin]  = useState({tipo:"receita",desc:"",valor:"",data:new Date().toISOString().slice(0,10),cat:"Serviço"});
   const [modalCon, setModalCon] = useState(false);
@@ -450,6 +433,11 @@ export default function App() {
   const [toast,setToast] = useState(null);
   const showOk   = m => { setToast({m,t:"ok"});   setTimeout(()=>setToast(null),2800); };
   const showWarn = m => { setToast({m,t:"w"});    setTimeout(()=>setToast(null),2800); };
+
+  // ── CONDICIONAIS APÓS TODOS OS HOOKS ──────────────────────
+  const isPro    = usuario?.plano === "pro";
+  const isGratis = usuario?.plano === "gratis";
+  function logout() { setUsuario(null); }
 
   // Financeiro cálculos
   const mesH = new Date().getMonth();
@@ -491,6 +479,20 @@ export default function App() {
   }
 
   const TABS=[{id:"dash",em:"📊",lb:"Início"},{id:"prosp",em:"📡",lb:"Prospecção"},{id:"os",em:"📋",lb:"OS"},{id:"crm",em:"🤝",lb:"CRM"},{id:"fin",em:"💰",lb:"Financeiro"},{id:"cfg",em:"⚙️",lb:"Config"}];
+
+  // ── GUARDS APÓS TODOS OS HOOKS ────────────────────────────
+  if (!usuario) return <TelaLogin onLogin={setUsuario}/>;
+  if (usuario.plano === "expirado") return (
+    <div style={{minHeight:"100vh",background:"#0b0f1a",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{textAlign:"center",maxWidth:380}}>
+        <div style={{fontSize:52,marginBottom:16}}>⏰</div>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,color:"#e2e8f0",marginBottom:8}}>Assinatura Expirada</div>
+        <div style={{fontSize:15,color:"#64748b",marginBottom:24}}>Renove seu plano para continuar usando o JARBIS PRO.</div>
+        <a href={HOTMART_URL} target="_blank" rel="noreferrer" style={{display:"block",background:"linear-gradient(135deg,#6366f1,#818cf8)",color:"#fff",borderRadius:13,padding:"16px",fontSize:16,fontWeight:800,textDecoration:"none",marginBottom:12}}>💳 Renovar Assinatura</a>
+        <button onClick={logout} style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",color:"#475569",borderRadius:11,padding:"13px",fontSize:14,fontWeight:600,cursor:"pointer"}}>Sair</button>
+      </div>
+    </div>
+  );
 
   return (
     <div style={{minHeight:"100vh",background:"#0b0f1a",fontFamily:"'DM Sans',sans-serif",color:"#e2e8f0",overflowX:"hidden"}}>
