@@ -17,8 +17,10 @@ const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov"
 
 // ── SUPABASE ──────────────────────────────────────────────────
 const SH = {"apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Content-Type":"application/json"};
-async function dbGet(t,c,v){try{const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${c}=eq.${encodeURIComponent(v)}&select=*`,{headers:SH});return await r.json();}catch{return[];}}
+async function dbGet(t,c,v){try{const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${c}=eq.${encodeURIComponent(v)}&select=*&order=criado_em.desc`,{headers:SH});return await r.json();}catch{return[];}}
 async function dbIns(t,d){try{const r=await fetch(`${SUPA_URL}/rest/v1/${t}`,{method:"POST",headers:{...SH,"Prefer":"return=representation"},body:JSON.stringify(d)});const j=await r.json();return Array.isArray(j)?j[0]:j;}catch{return null;}}
+async function dbUpd(t,c,v,d){try{await fetch(`${SUPA_URL}/rest/v1/${t}?${c}=eq.${encodeURIComponent(v)}`,{method:"PATCH",headers:{...SH,"Prefer":"return=representation"},body:JSON.stringify(d)});}catch{}}
+async function dbDel(t,c,v){try{await fetch(`${SUPA_URL}/rest/v1/${t}?${c}=eq.${encodeURIComponent(v)}`,{method:"DELETE",headers:SH});}catch{}}
 async function fazerLogin(email,senha){const rows=await dbGet("usuarios","email",email.toLowerCase().trim());if(!rows||rows.length===0)return{erro:"E-mail não encontrado."};const u=rows[0];if(u.senha!==senha)return{erro:"Senha incorreta."};return{usuario:u};}
 async function fazerCadastro(nome,email,senha){const ex=await dbGet("usuarios","email",email.toLowerCase().trim());if(ex&&ex.length>0)return{erro:"E-mail já cadastrado."};const u=await dbIns("usuarios",{nome,email:email.toLowerCase().trim(),senha,plano:"gratis",assinatura_ativa:false,creditos_prospeccao:5});if(!u)return{erro:"Erro ao criar conta."};return{usuario:u};}
 function loginGoogle(){window.location.href=`${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`;}
@@ -30,12 +32,12 @@ const PACOTES=[
   {creditos:200,valor:147, label:"Business",   desc:"200 contatos", cor:"#6366f1"},
 ];
 
-async function criarPagamento(email,nome,creditos){
+async function criarPagamento(email,nome,creditos,cpf){
   try{
     const r=await fetch("/api/pagar",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({email,nome,creditos})
+      body:JSON.stringify({email,nome,creditos,cpf:cpf||""})
     });
     return await r.json();
   }catch(e){return{erro:"Erro de conexão: "+e.message};}
@@ -59,35 +61,17 @@ const CNAES={
 
 async function buscarEmpresas(municipio, bairro, seg){
   try{
-    // Remove acentos para a API
     const norm=s=>s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
-
     const body={
       municipio:[norm(municipio)],
       codigo_atividade_principal:CNAES[seg]||["7111100"],
       ...(bairro&&bairro.trim()?{bairro:[norm(bairro)]}:{})
     };
-
-    const r=await fetch("/api/buscar",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(body)
-    });
-
-    if(!r.ok){
-      const err=await r.json().catch(()=>({}));
-      console.error("Proxy erro:",err);
-      return null;
-    }
-
+    const r=await fetch("/api/buscar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok)return null;
     const data=await r.json();
-    // API v2 retorna { data: { cnpj: [...] } }
-    const lista=data?.cnpjs||data?.data?.cnpj||data?.cnpj||[];
-    return{lista};
-  }catch(e){
-    console.error("Erro busca:",e);
-    return null;
-  }
+    return data;
+  }catch(e){return null;}
 }
 
 // ── VOZ ───────────────────────────────────────────────────────
@@ -325,8 +309,86 @@ function CalculadoraEletrica(){
   );
 }
 
-// ── PDF REAL ──────────────────────────────────────────────────
+// ── PDF + COMPARTILHAMENTO ────────────────────────────────────
 function gerarDocumento(os,emp,tipoDoc){
+  const fmtN=v=>(v||0).toFixed(2).replace(".",",");
+  const itens=(os.itens||[]).map(s=>`<tr><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0">${s.n}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:center">${s.q}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right">R$${fmtN(s.v)}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:700">R$${fmtN(s.q*s.v)}</td></tr>`).join("");
+  const total=(os.itens||[]).reduce((a,b)=>a+b.q*b.v,0)-(Number(os.desconto)||0);
+
+  // Texto simples para WhatsApp
+  const textoWA=`*${tipoDoc} Nº ${os.numero||"001"}*\n*${emp.nome||"Prótons Serviços Elétricos"}*\n\n*Cliente:* ${os.clienteNome||"—"}\n*Local:* ${os.local||"—"}\n*Data:* ${os.data||hoje()}\n*Pagamento:* ${os.pagamento||"—"}\n\n*Serviços:*\n${(os.itens||[]).map(i=>`• ${i.n} (${i.q}x) — R$${fmtN(i.q*i.v)}`).join("\n")}\n\n*TOTAL: R$${fmtN(total)}*\n${os.obs?"\n*Obs:* "+os.obs:""}`;
+
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${tipoDoc} ${os.numero||"001"}</title><style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:20px;max-width:720px;margin:0 auto;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a1a;padding-bottom:14px;margin-bottom:18px;}
+  .empresa{font-size:18px;font-weight:900;color:#1a1a1a;}
+  .sub{font-size:11px;color:#666;margin-top:3px;}
+  .titulo{background:#1a1a1a;color:#F5C518;padding:10px 14px;font-size:16px;font-weight:900;border-radius:6px;margin-bottom:16px;}
+  .info{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+  .info-box{background:#f8f8f8;border-radius:8px;padding:10px;}
+  .info-label{font-size:10px;color:#888;font-weight:700;text-transform:uppercase;margin-bottom:3px;}
+  .info-val{font-size:13px;font-weight:700;}
+  table{width:100%;border-collapse:collapse;margin-bottom:14px;}
+  th{background:#f5f5f5;padding:8px 6px;text-align:left;font-size:11px;color:#555;font-weight:700;border-bottom:2px solid #e5e5e5;}
+  .total-box{display:flex;justify-content:flex-end;margin-top:8px;}
+  .total-inner{min-width:220px;border-top:2px solid #1a1a1a;padding-top:8px;}
+  .total-row{display:flex;justify-content:space-between;margin-bottom:5px;font-size:13px;}
+  .total-final{display:flex;justify-content:space-between;font-size:19px;font-weight:900;}
+  .assinatura{margin-top:48px;text-align:center;border-top:1px solid #ccc;padding-top:10px;font-size:12px;color:#555;}
+  .btn-share{display:block;width:100%;margin:20px 0 8px;padding:14px;background:#25D366;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:900;cursor:pointer;font-family:Arial,sans-serif;}
+  .btn-print{display:block;width:100%;padding:12px;background:#1a1a1a;color:#F5C518;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;}
+  @media print{.btn-share,.btn-print{display:none;}}
+  </style></head><body>
+  <div class="header">
+    <div>
+      <div class="empresa">⚡ ${emp.nome||"Prótons Serviços Elétricos"}</div>
+      <div class="sub">${emp.cnpj?"CNPJ: "+emp.cnpj:""}${emp.crea?" · CREA: "+emp.crea:""}</div>
+      <div class="sub">${emp.tel||""}${emp.email?" · "+emp.email:""}</div>
+    </div>
+    <div style="text-align:right;font-size:12px;color:#888"><div>Nº ${os.numero||"001"}</div><div>${os.data||hoje()}</div></div>
+  </div>
+  <div class="titulo">${tipoDoc}</div>
+  <div class="info">
+    <div class="info-box"><div class="info-label">Cliente</div><div class="info-val">${os.clienteNome||"—"}</div><div class="sub">${os.clienteTel||""}</div></div>
+    <div class="info-box"><div class="info-label">Local</div><div class="info-val">${os.local||"—"}</div></div>
+    <div class="info-box"><div class="info-label">Pagamento</div><div class="info-val">${os.pagamento||"—"}</div></div>
+    <div class="info-box"><div class="info-label">Vencimento</div><div class="info-val">${os.vencimento||"—"}</div></div>
+  </div>
+  ${os.descricao?`<div style="background:#fef9c3;border-left:4px solid #F5C518;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px">${os.descricao}</div>`:""}
+  <table><thead><tr><th>Descrição</th><th style="text-align:center">Qtd</th><th style="text-align:right">Unit.</th><th style="text-align:right">Total</th></tr></thead><tbody>${itens}</tbody></table>
+  <div class="total-box"><div class="total-inner">
+    ${Number(os.desconto)>0?`<div class="total-row"><span>Desconto</span><span style="color:#ef4444">- R$${fmtN(Number(os.desconto))}</span></div>`:""}
+    ${Number(os.sinal)>0?`<div class="total-row"><span>Entrada</span><span>R$${fmtN(Number(os.sinal))}</span></div>`:""}
+    <div class="total-final"><span>TOTAL</span><span style="color:#C9A227">R$${fmtN(total)}</span></div>
+  </div></div>
+  ${os.obs?`<div style="margin-top:14px;background:#f8f8f8;border-radius:8px;padding:12px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:4px">OBSERVAÇÕES</div><div style="font-size:13px">${os.obs}</div></div>`:""}
+  <div class="assinatura">${emp.nome||"Prótons Serviços Elétricos"}${emp.crea?"<br>CREA: "+emp.crea:""}</div>
+
+  <!-- Botões de compartilhamento -->
+  <button class="btn-share" onclick="compartilhar()">💬 Compartilhar no WhatsApp</button>
+  <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+
+  <script>
+    const textoDoc = ${JSON.stringify(textoWA)};
+    function compartilhar(){
+      if(navigator.share){
+        navigator.share({title:'${tipoDoc} Nº ${os.numero||"001"}',text:textoDoc})
+          .catch(()=>abrirWA());
+      } else { abrirWA(); }
+    }
+    function abrirWA(){
+      window.open('https://wa.me/?text='+encodeURIComponent(textoDoc),'_blank');
+    }
+  </script>
+  </body></html>`;
+
+  try{
+    const w=window.open("","_blank");
+    if(!w){alert("Habilite pop-ups para visualizar o documento.");return;}
+    w.document.write(html);w.document.close();
+  }catch(e){alert("Erro: "+e.message);}
+}
   const itens=(os.itens||[]).map(s=>`<tr><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0">${s.n}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:center">${s.q}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right">R$${Number(s.v).toFixed(2).replace(".",",")}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:700">R$${(s.q*s.v).toFixed(2).replace(".",",")}</td></tr>`).join("");
   const total=(os.itens||[]).reduce((a,b)=>a+b.q*b.v,0)-(Number(os.desconto)||0);
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${tipoDoc} ${os.numero||"001"}</title><style>
@@ -658,6 +720,7 @@ export default function App(){
   const [pagandoPacote,setPagandoPacote]=useState(null);
   const [pagamento,   setPagamento]   = useState(null);
   const [loadPag,     setLoadPag]     = useState(false);
+  const [cpfPag,      setCpfPag]      = useState("");
   const [creditos,    setCreditos]    = useState(usuario?.creditos_prospeccao||5);
   const [fSN,setFSN]=useState(""); const [fSP,setFSP]=useState("");
   const [pCidade,      setPCidade]      = useState("");
@@ -689,6 +752,24 @@ export default function App(){
     }
   },[usuario]);
 
+  // Carrega dados do Supabase ao fazer login
+  useEffect(()=>{
+    if(!usuario?.id)return;
+    // Carrega OS salvas
+    dbGet("ordens_servico","usuario_id",usuario.id).then(rows=>{
+      if(rows&&rows.length>0){
+        const os=rows.map(r=>({...r,itens:r.itens_json?JSON.parse(r.itens_json):(r.itens||[])}));
+        setOrdens(os);
+      }
+    }).catch(()=>{});
+    // Carrega clientes
+    dbGet("clientes","usuario_id",usuario.id).then(rows=>{
+      if(rows&&rows.length>0)setClientes(rows);
+    }).catch(()=>{});
+    // Carrega créditos atualizados
+    buscarCreditos(usuario.email).then(c=>setCreditos(c)).catch(()=>{});
+  },[usuario?.id]);
+
   // Financeiro
   const finAtual = tipoFin==="empresa"?finEmp:tipoFin==="pessoal"?finPes:finObra;
   const setFinAtual = tipoFin==="empresa"?setFinEmp:tipoFin==="pessoal"?setFinPes:setFinObra;
@@ -702,11 +783,32 @@ export default function App(){
   function abrirOS(tipo){setEditOSId(null);setFormOS({numero:String(ordens.length+1).padStart(3,"0"),tipo:tipo||"orcamento",status:"orcamento",data:hoje(),pagamento:"À vista",clienteId:"",clienteNome:"",clienteTel:"",clienteEnd:"",local:"",descricao:"",obs:"",termos:"",desconto:0,sinal:0});setItensOS([]);setIN("");setIV("");setIQ("1");setModalOS(true);}
   function editOS(o){setEditOSId(o.id);setFormOS({...o});setItensOS(o.itens||[]);setIN("");setIV("");setIQ("1");setModalOS(true);}
   function addItem(){if(!iN||!iV)return;setItensOS(p=>[...p,{id:uid(),n:iN,v:Number(iV),q:Number(iQ||1)}]);setIN("");setIV("");setIQ("1");}
-  function salvarOS(){
-    const sub=itensOS.reduce((a,b)=>a+b.q*b.v,0),total=sub-(Number(formOS.desconto)||0);
-    const o={...formOS,id:editOSId||uid(),itens:itensOS,subtotal:sub,total};
-    if(editOSId)setOrdens(p=>p.map(x=>x.id===editOSId?o:x));else setOrdens(p=>[o,...p]);
+
+  async function salvarOS(){
+    const sub=itensOS.reduce((a,b)=>a+b.q*b.v,0);
+    const total=sub-(Number(formOS.desconto)||0);
+    const o={...formOS,id:editOSId||uid(),itens:itensOS,subtotal:sub,total,usuario_id:usuario.id,criado_em:new Date().toISOString()};
+    // Salva no Supabase
+    try{
+      if(editOSId){
+        await dbUpd("ordens_servico","id",editOSId,{...o,itens_json:JSON.stringify(o.itens),atualizado_em:new Date().toISOString()});
+        setOrdens(p=>p.map(x=>x.id===editOSId?o:x));
+      } else {
+        await dbIns("ordens_servico",{...o,itens_json:JSON.stringify(o.itens)});
+        setOrdens(p=>[o,...p]);
+      }
+    }catch{
+      // Fallback local se Supabase falhar
+      if(editOSId)setOrdens(p=>p.map(x=>x.id===editOSId?o:x));
+      else setOrdens(p=>[o,...p]);
+    }
     setModalOS(false);showOk(editOSId?"OS atualizada!":"OS criada!");
+  }
+
+  async function excluirOS(id){
+    await dbDel("ordens_servico","id",id);
+    setOrdens(p=>p.filter(o=>o.id!==id));
+    setModalOS(false);showWarn("OS removida.");
   }
 
   // Mapeamento de Obra
@@ -732,8 +834,8 @@ export default function App(){
     setPDone(false);setPPct(0);setPEmps([]);setPScan(true);
 
     const timer=setInterval(()=>{
-      setPPct(p=>{if(p>=90){clearInterval(timer);return 90;}return p+Math.random()*8+3;});
-    },150);
+      setPPct(p=>{if(p>=90){clearInterval(timer);return 90;}return p+Math.random()*6+2;});
+    },200);
 
     buscarEmpresas(pCidade.trim(),pBairro.trim(),pSeg).then(res=>{
       clearInterval(timer);
@@ -742,52 +844,73 @@ export default function App(){
 
       if(!res){
         showWarn("Erro ao conectar. Verifique a cidade e tente novamente.");
-        setPDone(true);
-        return;
+        setPDone(true);return;
       }
 
-      const lista=res.lista||[];
+      // Suporta resposta v5 e v4
+      const lista=res.cnpjs||res.data||[];
 
-      // Mapeamento correto campos v5 Casa dos Dados (tipo_resultado=completo)
-      // v5 completo retorna telefones em: telefones[0].ddd + telefones[0].numero
-      // ou ddd_telefone_1 com DDD embutido
-      let emps=lista.map(e=>{
-        const end=e.endereco||{};
-
-        // Tenta extrair telefone de todos os campos possíveis da v5
-        let tel="";
-        if(e.telefones&&e.telefones.length>0){
+      function extrairTel(e){
+        // v5 completo: telefones[]
+        if(e.telefones?.length>0){
           const t=e.telefones[0];
-          tel="("+(t.ddd||"")+")"+" "+(t.numero||t.telefone||"");
-        } else if(e.ddd_telefone_1){
-          const ddd=String(e.ddd_telefone_1).slice(0,2);
-          const num=String(e.ddd_telefone_1).slice(2);
-          tel="("+ddd+") "+num;
-        } else if(e.telefone1){
-          tel=e.ddd1?"("+e.ddd1+") "+e.telefone1:e.telefone1;
+          const ddd=(t.ddd||"").toString().replace(/\D/g,"");
+          const num=(t.numero||t.telefone||"").toString().replace(/\D/g,"");
+          if(ddd&&num)return"("+ddd+") "+num;
         }
+        // v5 simples: ddd_telefone_1 = "11912345678"
+        if(e.ddd_telefone_1){
+          const s=String(e.ddd_telefone_1).replace(/\D/g,"");
+          if(s.length>=10)return"("+s.slice(0,2)+") "+s.slice(2);
+        }
+        // v4: ddd1 + telefone1
+        if(e.ddd1&&e.telefone1){
+          return"("+String(e.ddd1).replace(/\D/g,"")+") "+String(e.telefone1).replace(/\D/g,"");
+        }
+        // Qualquer campo com "telefone"
+        const campos=["telefone","telefone1","fone","celular","whatsapp"];
+        for(const c of campos){
+          if(e[c]){const n=String(e[c]).replace(/\D/g,"");if(n.length>=8)return n;}
+        }
+        return"";
+      }
 
-        return {
-          id:e.cnpj||uid(),
-          nome:(e.razao_social||e.nome_fantasia||"Empresa").trim(),
-          cnpj:e.cnpj||"",
-          tel:tel.trim(),
-          email:e.email||"",
-          endereco:[end.tipo_logradouro,end.logradouro,end.numero,end.complemento,end.bairro,end.municipio,end.uf].filter(Boolean).join(", "),
-          municipio:end.municipio||"",
-          porte:e.porte_empresa?.descricao||e.porte||"",
-          segmento:pSeg,
-          enviado:false,
-        };
-      }).filter(e=>e.tel.replace(/\D/g,"").length>=8);
+      function extrairEnd(e){
+        const end=e.endereco||{};
+        // v5
+        if(end.logradouro){
+          return[end.tipo_logradouro,end.logradouro,end.numero,end.complemento,end.bairro,end.municipio,end.uf].filter(Boolean).join(", ");
+        }
+        // v4
+        return[e.logradouro,e.numero,e.complemento,e.bairro,e.municipio||e.cidade,e.uf].filter(Boolean).join(", ");
+      }
+
+      let emps=lista.map(e=>({
+        id:e.cnpj||uid(),
+        nome:(e.razao_social||e.nome_fantasia||"Empresa").trim(),
+        cnpj:(e.cnpj||"").replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5"),
+        tel:extrairTel(e),
+        email:e.email||"",
+        endereco:extrairEnd(e),
+        porte:e.porte_empresa?.descricao||e.porte||e.descricao_porte||"",
+        segmento:pSeg,
+        enviado:false,
+      })).filter(e=>e.tel.replace(/\D/g,"").length>=8);
 
       setPEmps(emps);
       setPDone(true);
 
       if(emps.length===0){
-        showWarn("Nenhuma empresa com telefone encontrada. Tente outra cidade ou segmento.");
+        // Mostra informação sobre o que a API retornou
+        if(lista.length>0){
+          showWarn("Empresas encontradas mas sem telefone. Tente outro segmento ou cidade.");
+        } else if(res.debug_v5||res.debug_v4){
+          showWarn("API retornou 0 resultados. Verifique o nome da cidade (sem acento).");
+        } else {
+          showWarn("Nenhuma empresa encontrada. Tente outra cidade ou segmento.");
+        }
       } else {
-        showOk(emps.length+" empresas com telefone encontradas!");
+        showOk(emps.length+" empresas com WhatsApp encontradas! ⚡");
       }
     }).catch(()=>{
       clearInterval(timer);
@@ -1325,7 +1448,7 @@ export default function App(){
             {itensOS.length>0&&<div style={{background:"#fef9c3",border:`1px solid ${GOLD}`,borderRadius:10,padding:"11px 13px"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#888"}}>Subtotal</span><span style={{fontSize:12,fontWeight:800}}>{fmt(itensOS.reduce((a,b)=>a+b.q*b.v,0))}</span></div><div style={{display:"flex",justifyContent:"space-between",borderTop:"1px solid #e5e5e5",paddingTop:6}}><span style={{fontSize:13,fontWeight:900,color:DARK}}>TOTAL</span><span style={{fontSize:18,fontWeight:900,color:GOLD2}}>{fmt(itensOS.reduce((a,b)=>a+b.q*b.v,0)-(Number(formOS.desconto)||0))}</span></div></div>}
             <div><label className="lbl">Observações</label><textarea className="inp" rows={2} value={formOS.obs||""} onChange={e=>setFormOS(p=>({...p,obs:e.target.value}))} style={{resize:"vertical"}}/></div>
             <button className="btn btn-gold" onClick={salvarOS} style={{width:"100%",fontSize:14,padding:"13px"}}>💾 Salvar OS</button>
-            {editOSId&&<button className="btn btn-r" onClick={()=>{setOrdens(p=>p.filter(o=>o.id!==editOSId));setModalOS(false);showWarn("OS removida.");}} style={{width:"100%",fontSize:12,padding:"11px"}}>🗑️ Excluir</button>}
+            {editOSId&&<button className="btn btn-r" onClick={()=>excluirOS(editOSId)} style={{width:"100%",fontSize:12,padding:"11px"}}>🗑️ Excluir</button>}
             <button className="btn btn-ghost" onClick={()=>setModalOS(false)} style={{width:"100%",fontSize:12,padding:"11px"}}>Cancelar</button>
           </div>
         </div>
@@ -1477,14 +1600,18 @@ export default function App(){
                 ✅ <b>{pagandoPacote.desc}</b> por <b style={{color:GOLD2}}>R${pagandoPacote.valor}</b><br/>
                 Pagamento via <b>PIX</b> — liberação automática após confirmação
               </div>
+              <div style={{marginBottom:10}}>
+                <label style={{fontSize:11,fontWeight:800,color:"#888",marginBottom:5,display:"block",textTransform:"uppercase",letterSpacing:.5}}>CPF (opcional — melhora aprovação)</label>
+                <input value={cpfPag} onChange={e=>setCpfPag(e.target.value)} placeholder="000.000.000-00" style={{width:"100%",background:"#f8f8f8",border:"1.5px solid #e5e5e5",borderRadius:10,padding:"11px 13px",fontSize:14,outline:"none"}}/>
+              </div>
               <button className="btn btn-gold" onClick={async()=>{
                 setLoadPag(true);
-                const res=await criarPagamento(usuario.email,usuario.nome,pagandoPacote.creditos);
+                const res=await criarPagamento(usuario.email,usuario.nome,pagandoPacote.creditos,cpfPag);
                 setLoadPag(false);
-                if(res.erro){showWarn(res.erro);return;}
+                if(res.erro){showWarn("Erro: "+res.erro);return;}
                 setPagamento(res);
               }} style={{width:"100%",fontSize:15,padding:"14px",marginBottom:8}} disabled={loadPag}>
-                {loadPag?"⟳ Gerando PIX...":"⚡ Gerar PIX"}
+                {loadPag?"⟳ Gerando PIX...":"⚡ Gerar QR Code PIX"}
               </button>
             </>}
             <button className="btn btn-ghost" onClick={()=>setModalCreditos(false)} style={{width:"100%",fontSize:13,padding:"12px"}}>Cancelar</button>
