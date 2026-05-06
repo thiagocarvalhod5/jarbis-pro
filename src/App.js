@@ -617,6 +617,7 @@ export default function App(){
   const [formVisita,   setFormVisita]   = useState({});
   const [modalPDF,    setModalPDF]    = useState(false);
   const [osPDF,       setOsPDF]       = useState(null);
+  const [modalCalc,   setModalCalc]   = useState(false);
   const [fSN,setFSN]=useState(""); const [fSP,setFSP]=useState("");
   const [pCidade,      setPCidade]      = useState("");
   const [pBairro,      setPBairro]      = useState("");
