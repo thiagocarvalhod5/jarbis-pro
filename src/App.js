@@ -54,7 +54,7 @@ async function buscarEmpresas(municipio, bairro, seg){
 
     const data=await r.json();
     // API v2 retorna { data: { cnpj: [...] } }
-    const lista=data?.data?.cnpj||data?.cnpj||[];
+    const lista=data?.cnpjs||data?.data?.cnpj||data?.cnpj||[];
     return{lista};
   }catch(e){
     console.error("Erro busca:",e);
@@ -713,18 +713,22 @@ export default function App(){
 
       const lista=res.lista||[];
 
-      // Mapeia campos da API v2 Casa dos Dados
+      // Mapeia campos da API v5 Casa dos Dados
+      // v5 retorna: cnpj, razao_social, nome_fantasia, ddd_telefone_1, ddd_telefone_2
+      // logradouro, numero, complemento, bairro, municipio, uf, cep
       let emps=lista.map(e=>({
         id:e.cnpj||uid(),
         nome:(e.razao_social||e.nome_fantasia||"Empresa").trim(),
         cnpj:e.cnpj||"",
         tel:e.ddd_telefone_1
-          ?"("+e.ddd_telefone_1.slice(0,2)+") "+e.ddd_telefone_1.slice(2)
-          :e.ddd1&&e.telefone1
-            ?"("+e.ddd1+") "+e.telefone1
-            :"",
+          ?"("+e.ddd_telefone_1.toString().slice(0,2)+") "+e.ddd_telefone_1.toString().slice(2)
+          :e.ddd_telefone_2
+            ?"("+e.ddd_telefone_2.toString().slice(0,2)+") "+e.ddd_telefone_2.toString().slice(2)
+            :e.ddd1&&e.telefone1
+              ?"("+e.ddd1+") "+e.telefone1
+              :"",
         email:e.email||"",
-        endereco:[e.logradouro,e.numero,e.complemento,e.bairro,e.municipio||e.nome_municipio,e.uf].filter(Boolean).join(", "),
+        endereco:[e.logradouro,e.numero,e.complemento,e.bairro,e.municipio,e.uf].filter(Boolean).join(", "),
         segmento:pSeg,
         porte:e.porte||e.descricao_porte||"",
         enviado:false,
