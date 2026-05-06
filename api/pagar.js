@@ -1,6 +1,4 @@
 // api/pagar.js
-// Cria cobrança no Asaas e retorna link de pagamento + QR Code PIX
-
 const ASAAS_KEY = "$aact_prod_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OmM2OWU0YTNmLWVmYTQtNDhjOC04ZmU3LTdjNDczMDIzOGI0Yzo6JGFhY2hfNjBhZmMyMTQtZGQ5ZS00ZDI4LTgwN2UtZTdmNWVmNTJmNDZl";
 const ASAAS_URL = "https://api.asaas.com/v3";
 
@@ -14,83 +12,70 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ erro: "Método não permitido" });
 
   try {
-    const { email, nome, creditos } = req.body;
-
-    if (!email || !creditos) {
-      return res.status(400).json({ erro: "Email e créditos são obrigatórios" });
-    }
+    const { email, nome, creditos, cpf } = req.body;
+    if (!email || !creditos) return res.status(400).json({ erro: "Email e créditos obrigatórios" });
 
     const pacote = PACOTES[Number(creditos)];
-    if (!pacote) {
-      return res.status(400).json({ erro: "Pacote inválido. Use 20, 50 ou 200" });
+    if (!pacote) return res.status(400).json({ erro: "Pacote inválido" });
+
+    // Busca cliente existente
+    const buscaResp = await fetch(`${ASAAS_URL}/customers?email=${encodeURIComponent(email)}&limit=1`, {
+      headers: { "access_token": ASAAS_KEY },
+    });
+    const buscaData = await buscaResp.json();
+    let clienteId = buscaData?.data?.[0]?.id;
+
+    // Cria cliente se não existir
+    if (!clienteId) {
+      const body = { name: nome || email.split("@")[0], email, externalReference: email };
+      if (cpf) body.cpfCnpj = cpf.replace(/\D/g, "");
+      const cr = await fetch(`${ASAAS_URL}/customers`, {
+        method: "POST",
+        headers: { "access_token": ASAAS_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const c = await cr.json();
+      if (!c.id) return res.status(500).json({ erro: "Erro ao criar cliente", detalhe: c });
+      clienteId = c.id;
     }
 
-    // 1. Cria ou busca cliente no Asaas
-    const clienteResp = await fetch(`${ASAAS_URL}/customers`, {
+    // Cria cobrança PIX
+    const pr = await fetch(`${ASAAS_URL}/payments`, {
       method: "POST",
-      headers: {
-        "access_token": ASAAS_KEY,
-        "Content-Type": "application/json",
-      },
+      headers: { "access_token": ASAAS_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: nome || email.split("@")[0],
-        email: email,
+        customer: clienteId,
+        billingType: "PIX",
+        value: pacote.valor,
+        dueDate: new Date(Date.now() + 24*60*60*1000).toISOString().split("T")[0],
+        description: pacote.descricao,
         externalReference: email,
       }),
     });
+    const cobranca = await pr.json();
+    if (!cobranca.id) return res.status(500).json({ erro: "Erro ao gerar PIX", detalhe: cobranca });
 
-    const cliente = await clienteResp.json();
-    if (!cliente.id) {
-      return res.status(500).json({ erro: "Erro ao criar cliente no Asaas", detalhe: cliente });
-    }
-
-    // 2. Cria cobrança PIX
-    const cobrancaResp = await fetch(`${ASAAS_URL}/payments`, {
-      method: "POST",
-      headers: {
-        "access_token": ASAAS_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        customer: cliente.id,
-        billingType: "PIX",
-        value: pacote.valor,
-        dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-        description: pacote.descricao,
-        externalReference: email, // usado pelo webhook para identificar o usuário
-      }),
-    });
-
-    const cobranca = await cobrancaResp.json();
-    if (!cobranca.id) {
-      return res.status(500).json({ erro: "Erro ao criar cobrança", detalhe: cobranca });
-    }
-
-    // 3. Busca QR Code PIX
-    const pixResp = await fetch(`${ASAAS_URL}/payments/${cobranca.id}/pixQrCode`, {
+    // QR Code
+    const qr = await fetch(`${ASAAS_URL}/payments/${cobranca.id}/pixQrCode`, {
       headers: { "access_token": ASAAS_KEY },
     });
-    const pix = await pixResp.json();
+    const pix = await qr.json();
 
     return res.status(200).json({
       ok: true,
       cobranca_id: cobranca.id,
       valor: pacote.valor,
       creditos: pacote.creditos,
-      descricao: pacote.descricao,
       pix_copia_cola: pix.payload || "",
       pix_qrcode: pix.encodedImage || "",
       link_pagamento: cobranca.invoiceUrl || "",
-      status: cobranca.status,
     });
 
-  } catch (erro) {
-    console.error("Erro pagar.js:", erro);
-    return res.status(500).json({ erro: "Erro interno", detalhe: erro.message });
+  } catch (e) {
+    return res.status(500).json({ erro: "Erro interno", detalhe: e.message });
   }
 }
