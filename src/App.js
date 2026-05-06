@@ -627,6 +627,8 @@ export default function App(){
   const [modalPDF,    setModalPDF]    = useState(false);
   const [osPDF,       setOsPDF]       = useState(null);
   const [modalCalc,   setModalCalc]   = useState(false);
+  const [modalEst,    setModalEst]    = useState(false);
+  const [formEst,     setFormEst]     = useState({id:"",nome:"",qty:0,un:"un",preco:0});
   const [fSN,setFSN]=useState(""); const [fSP,setFSP]=useState("");
   const [pCidade,      setPCidade]      = useState("");
   const [pBairro,      setPBairro]      = useState("");
@@ -1399,6 +1401,29 @@ export default function App(){
             <div><label className="lbl">Observações</label><textarea className="inp" rows={2} value={formCon.obs||""} onChange={e=>setFormCon(p=>({...p,obs:e.target.value}))} style={{resize:"vertical"}}/></div>
             <button className="btn btn-gold" onClick={()=>{if(contatos.find(c=>c.id===formCon.id))setContatos(p=>p.map(c=>c.id===formCon.id?formCon:c));else setContatos(p=>[{...formCon,id:formCon.id||uid(),criadoEm:hoje()},...p]);setModalCon(false);showOk("Salvo!");}} style={{width:"100%",fontSize:14,padding:"13px"}}>💾 Salvar</button>
             <button className="btn btn-ghost" onClick={()=>setModalCon(false)} style={{width:"100%",fontSize:12,padding:"11px"}}>Cancelar</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* MODAL ESTOQUE */}
+      {modalEst&&<div className="mbg" onClick={()=>setModalEst(false)}>
+        <div className="mdl" onClick={e=>e.stopPropagation()}>
+          <div className="hdl"/>
+          <div style={{fontSize:16,fontWeight:900,marginBottom:14}}>📦 {formEst.id?"Editar Item":"Novo Item"}</div>
+          <div style={{display:"flex",flexDirection:"column",gap:11}}>
+            <div><label className="lbl">Nome do material</label><input className="inp" value={formEst.nome||""} onChange={e=>setFormEst(p=>({...p,nome:e.target.value}))} placeholder="Ex: Cabo 2,5mm"/></div>
+            <div className="g2">
+              <div><label className="lbl">Quantidade</label><input className="inp" type="number" value={formEst.qty||0} onChange={e=>setFormEst(p=>({...p,qty:Number(e.target.value)}))}/></div>
+              <div><label className="lbl">Unidade</label><select className="sel" value={formEst.un||"un"} onChange={e=>setFormEst(p=>({...p,un:e.target.value}))}>{["un","m","kg","l","cx","pc","rolo"].map(u=><option key={u}>{u}</option>)}</select></div>
+            </div>
+            <div><label className="lbl">Preço unitário (R$)</label><input className="inp" type="number" step="0.01" value={formEst.preco||0} onChange={e=>setFormEst(p=>({...p,preco:Number(e.target.value)}))}/></div>
+            <button className="btn btn-gold" onClick={()=>{
+              if(!formEst.nome){showWarn("Digite o nome do material.");return;}
+              const item={...formEst,id:formEst.id||uid()};
+              setEstoque(p=>p.find(x=>x.id===item.id)?p.map(x=>x.id===item.id?item:x):[item,...p]);
+              setModalEst(false);showOk("Item salvo!");
+            }} style={{width:"100%",fontSize:14,padding:"13px"}}>💾 Salvar</button>
+            <button className="btn btn-ghost" onClick={()=>setModalEst(false)} style={{width:"100%",fontSize:12,padding:"11px"}}>Cancelar</button>
           </div>
         </div>
       </div>}
