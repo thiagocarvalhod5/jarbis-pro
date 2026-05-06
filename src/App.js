@@ -24,32 +24,40 @@ async function fazerCadastro(nome,email,senha){const ex=await dbGet("usuarios","
 function loginGoogle(){window.location.href=`${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`;}
 
 // ── CASA DOS DADOS (via proxy Vercel) ────────────────────────
-const CNAES={arquitetura:["7111100"],engenharia:["7112000"],construtora:["4120400","4399103"],imobiliaria:["6821801","6821802"],industria:["2899199","2812200"],comercio:["4789099","4744001"],hospital:["8610101","8630501"],escola:["8513900","8520100"],condominio:["8112500","6810202"],supermercado:["4711301","4711302"]};
+const CNAES={
+  arquitetura:["7111100"],engenharia:["7112000"],
+  construtora:["4120400","4399103"],imobiliaria:["6821801","6821802"],
+  industria:["2899199","2812200"],comercio:["4789099","4744001"],
+  hospital:["8610101","8630501"],escola:["8513900","8520100"],
+  condominio:["8112500","6810202"],supermercado:["4711301","4711302"]
+};
 
-async function buscarEmpresas(municipio,bairro,seg){
+async function buscarEmpresas(municipio, bairro, seg){
   try{
     const body={
-      codigo_atividade_principal:CNAES[seg]||["7111100"],
-      situacao_cadastral:["ATIVA"],
       municipio:[municipio.toLowerCase()],
+      codigo_atividade_principal:CNAES[seg]||["7111100"],
       ...(bairro?{bairro:[bairro.toLowerCase()]}:{})
     };
-    // Tenta via proxy Vercel primeiro (resolve CORS)
-    try{
-      const r=await fetch("/api/buscar",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(body)
-      });
-      if(r.ok)return await r.json();
-    }catch{}
-    // Fallback: direto (pode dar CORS em alguns navegadores)
-    const r=await fetch("https://api.casadosdados.com.br/v5/cnpj/pesquisa",{
+
+    const r=await fetch("/api/buscar",{
       method:"POST",
-      headers:{"api-key":CASA_KEY,"Content-Type":"application/json"},
+      headers:{"Content-Type":"application/json"},
       body:JSON.stringify(body)
     });
-    return await r.json();
+
+    if(!r.ok){
+      const err=await r.json().catch(()=>({}));
+      console.error("Proxy erro:",err);
+      return null;
+    }
+
+    const data=await r.json();
+    console.log("Resposta API:", JSON.stringify(data).slice(0,300));
+
+    // A API v2 retorna { data: { cnpj: [...] } } ou { cnpj: [...] }
+    const lista=data?.data?.cnpj||data?.cnpj||data?.data||data?.estabelecimentos||data?.empresas||[];
+    return{lista};
   }catch(e){
     console.error("Erro busca:",e);
     return null;
@@ -687,19 +695,61 @@ export default function App(){
 
   // Prospecção
   function iniciarScan(){
-    if(pScan||!pCidade){showWarn("Digite o nome da cidade.");return;}
+    if(pScan||!pCidade.trim()){showWarn("Digite o nome da cidade.");return;}
     setPDone(false);setPPct(0);setPEmps([]);setPScan(true);
-    buscarEmpresas(pCidade,pBairro,pSeg).then(data=>{
+
+    const timer=setInterval(()=>{
+      setPPct(p=>{if(p>=90){clearInterval(timer);return 90;}return p+Math.random()*8+3;});
+    },150);
+
+    buscarEmpresas(pCidade.trim(),pBairro.trim(),pSeg).then(res=>{
+      clearInterval(timer);
       setPScan(false);
-      if(!data||data.error){showWarn("Erro ao buscar. Verifique a cidade e tente novamente.");return;}
-      let emps=(data.data||data.cnpjs||data.empresas||[])
-        .map(e=>({id:e.cnpj||uid(),nome:e.razao_social||e.nome_fantasia||"Empresa",cnpj:e.cnpj||"",tel:(e.ddd1&&e.telefone1)?"("+e.ddd1+") "+e.telefone1:"",endereco:[e.logradouro,e.numero,e.bairro,e.municipio,e.uf].filter(Boolean).join(", "),segmento:pSeg,porte:e.porte||"",enviado:false}))
-        .filter(e=>e.tel); // apenas com telefone
-      setPEmps(emps);setPDone(true);
-      if(emps.length===0)showWarn("Nenhuma empresa com telefone encontrada nessa região.");
-      else showOk(emps.length+" empresas com WhatsApp encontradas!");
+      setPPct(100);
+
+      if(!res){
+        showWarn("Erro ao conectar. Verifique a cidade e tente novamente.");
+        setPDone(true);
+        return;
+      }
+
+      const lista=res.lista||[];
+
+      // Mapeia campos da API v2 Casa dos Dados
+      let emps=lista.map(e=>({
+        id:e.cnpj||uid(),
+        nome:(e.razao_social||e.nome_fantasia||"Empresa").trim(),
+        cnpj:e.cnpj||"",
+        tel:e.ddd_telefone_1?(
+          "("+e.ddd_telefone_1.slice(0,2)+") "+e.ddd_telefone_1.slice(2)
+        ):e.telefone1?(
+          e.ddd1?"("+e.ddd1+") "+e.telefone1:e.telefone1
+        ):"",
+        email:e.email||"",
+        endereco:[
+          e.logradouro||(e.descricao_tipo_logradouro+" "+e.logradouro),
+          e.numero,e.complemento,e.bairro||(e.nome_cidade||""),
+          e.municipio||(e.nome_municipio||""),e.uf
+        ].filter(Boolean).join(", "),
+        segmento:pSeg,
+        porte:e.porte||e.descricao_porte||"",
+        enviado:false,
+      })).filter(e=>e.tel.replace(/\D/g,"").length>=8);
+
+      setPEmps(emps);
+      setPDone(true);
+
+      if(emps.length===0){
+        showWarn("Nenhuma empresa com telefone encontrada. Tente outra cidade ou segmento.");
+      } else {
+        showOk(emps.length+" empresas com telefone encontradas!");
+      }
+    }).catch(()=>{
+      clearInterval(timer);
+      setPScan(false);
+      setPDone(true);
+      showWarn("Erro na busca. Tente novamente.");
     });
-    let p=0;const t=setInterval(()=>{p+=Math.random()*8+3;if(p>=95){clearInterval(t);p=95;}setPPct(Math.min(95,p));},150);
   }
 
   function enviarWA(e){
