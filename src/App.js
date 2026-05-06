@@ -748,37 +748,38 @@ export default function App(){
 
       const lista=res.lista||[];
 
-      // Mapeamento correto campos v5 Casa dos Dados
+      // Mapeamento correto campos v5 Casa dos Dados (tipo_resultado=completo)
+      // v5 completo retorna telefones em: telefones[0].ddd + telefones[0].numero
+      // ou ddd_telefone_1 com DDD embutido
       let emps=lista.map(e=>{
-        // Telefone pode vir em campos variados dependendo do tipo_resultado
         const end=e.endereco||{};
-        const tel=e.ddd_telefone_1
-          ?"("+String(e.ddd_telefone_1).slice(0,2)+") "+String(e.ddd_telefone_1).slice(2)
-          :e.telefone1
-            ?e.ddd1?"("+e.ddd1+") "+e.telefone1:e.telefone1
-            :e.contato?.telefone1||"";
+
+        // Tenta extrair telefone de todos os campos possíveis da v5
+        let tel="";
+        if(e.telefones&&e.telefones.length>0){
+          const t=e.telefones[0];
+          tel="("+(t.ddd||"")+")"+" "+(t.numero||t.telefone||"");
+        } else if(e.ddd_telefone_1){
+          const ddd=String(e.ddd_telefone_1).slice(0,2);
+          const num=String(e.ddd_telefone_1).slice(2);
+          tel="("+ddd+") "+num;
+        } else if(e.telefone1){
+          tel=e.ddd1?"("+e.ddd1+") "+e.telefone1:e.telefone1;
+        }
 
         return {
           id:e.cnpj||uid(),
           nome:(e.razao_social||e.nome_fantasia||"Empresa").trim(),
           cnpj:e.cnpj||"",
-          tel,
-          email:e.email||e.contato?.email||"",
-          endereco:[
-            end.tipo_logradouro,end.logradouro,end.numero,
-            end.complemento,end.bairro,end.municipio,end.uf
-          ].filter(Boolean).join(", "),
+          tel:tel.trim(),
+          email:e.email||"",
+          endereco:[end.tipo_logradouro,end.logradouro,end.numero,end.complemento,end.bairro,end.municipio,end.uf].filter(Boolean).join(", "),
           municipio:end.municipio||"",
           porte:e.porte_empresa?.descricao||e.porte||"",
           segmento:pSeg,
           enviado:false,
         };
-      }).filter(e=>{
-        const nums=e.tel.replace(/\D/g,"");
-        // Celular brasileiro: 11 dígitos com 9 na frente (ex: 11 9XXXX-XXXX)
-        // ou 10 dígitos sem o 9 mas ainda válido para WhatsApp
-        return nums.length>=10&&nums.length<=11;
-      });
+      }).filter(e=>e.tel.replace(/\D/g,"").length>=8);
 
       setPEmps(emps);
       setPDone(true);
