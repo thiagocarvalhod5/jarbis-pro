@@ -130,7 +130,7 @@ function processarComando(cmd, nomeAssistente){
     return`No Mapeamento de Obra você cria os cômodos, mapeia tomadas, lâmpadas e disjuntores, e gera o orçamento automaticamente em PDF!`;
   if(c.includes("calculadora")||c.includes("corrente")||c.includes("potência")||c.includes("cabo"))
     return`A Calculadora Elétrica calcula corrente, potência, queda de tensão e indica o cabo e disjuntor ideais para cada circuito!`;
-  if(c.includes("foto")||c.includes("visita")||c.includes("foto"))
+  if(c.includes("foto")||c.includes("visita"))
     return`Em Visitas Técnicas você cria pastas por obra e tira fotos direto pelo celular para documentar o serviço!`;
   if(c.includes("cliente"))
     return`Em Clientes você cadastra todos os seus clientes com telefone, endereço e histórico. Pode chamar pelo WhatsApp com um toque!`;
@@ -217,7 +217,6 @@ function CalculadoraEletrica(){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      {/* Tipo de cálculo */}
       <div className="card" style={{padding:14}}>
         <div style={{fontSize:14,fontWeight:800,marginBottom:10,color:DARK}}>Tipo de Cálculo</div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
@@ -225,20 +224,15 @@ function CalculadoraEletrica(){
         </div>
       </div>
 
-      {/* Formulário */}
       <div className="card" style={{padding:14}}>
         <div style={{fontSize:14,fontWeight:800,marginBottom:12,color:DARK}}>⚡ Dados</div>
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {/* Potência */}
           {tipo!=="arcondicionado"&&tipo!=="carga"&&<div><label className="lbl">{tipo==="motor"?"Potência do motor (cv/kW)":"Potência (W)"}</label><input className="inp" type="number" value={form.pot} onChange={e=>setForm(p=>({...p,pot:e.target.value}))} placeholder={tipo==="motor"?"Ex: 5 (cv) ou 3.7 (kW)":"Ex: 1500"}/></div>}
-          {/* BTU */}
           {tipo==="arcondicionado"&&<div><label className="lbl">Capacidade (BTU)</label><select className="sel" value={form.btu} onChange={e=>setForm(p=>({...p,btu:e.target.value}))}><option value="">Selecione...</option>{[7000,9000,12000,18000,24000,30000,36000,48000,60000].map(b=><option key={b} value={b}>{b.toLocaleString()} BTU</option>)}</select></div>}
-          {/* Carga Total */}
           {tipo==="carga"&&<>
             <div><label className="lbl">Carga total instalada (W)</label><input className="inp" type="number" value={form.cargaTotal} onChange={e=>setForm(p=>({...p,cargaTotal:e.target.value}))} placeholder="Soma de todas as cargas"/></div>
             <div><label className="lbl">Fator de demanda</label><select className="sel" value={form.fd} onChange={e=>setForm(p=>({...p,fd:e.target.value}))}><option value="0.5">50% — Grande residência</option><option value="0.6">60% — Residência média</option><option value="0.7">70% — Residência pequena</option><option value="0.8">80% — Comércio</option><option value="1.0">100% — Industrial</option></select></div>
           </>}
-          {/* Fases motor */}
           {tipo==="motor"&&<>
             <div><label className="lbl">Tipo de motor</label><select className="sel" value={form.fases} onChange={e=>setForm(p=>({...p,fases:e.target.value}))}><option value="1">Monofásico</option><option value="3">Trifásico</option></select></div>
             <div><label className="lbl">Rendimento do motor (%)</label><select className="sel" value={form.rendimento} onChange={e=>setForm(p=>({...p,rendimento:e.target.value}))}><option value="0.75">75%</option><option value="0.80">80%</option><option value="0.85">85%</option><option value="0.90">90% (padrão)</option><option value="0.95">95%</option></select></div>
@@ -252,7 +246,6 @@ function CalculadoraEletrica(){
         </div>
       </div>
 
-      {/* Resultado */}
       {res&&<div className="card" style={{padding:14}}>
         <div style={{fontSize:14,fontWeight:800,marginBottom:12,color:DARK}}>📊 Resultado</div>
         {[
@@ -273,7 +266,6 @@ function CalculadoraEletrica(){
         </div>
       </div>}
 
-      {/* Tabela NBR 5410 */}
       <div className="card" style={{padding:14}}>
         <div style={{fontSize:14,fontWeight:800,marginBottom:10,color:DARK}}>📚 Referência NBR 5410</div>
         <div style={{overflowX:"auto"}}>
@@ -315,7 +307,6 @@ function gerarDocumento(os,emp,tipoDoc){
   const itens=(os.itens||[]).map(s=>`<tr><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0">${s.n}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:center">${s.q}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right">R$${fmtN(s.v)}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:700">R$${fmtN(s.q*s.v)}</td></tr>`).join("");
   const total=(os.itens||[]).reduce((a,b)=>a+b.q*b.v,0)-(Number(os.desconto)||0);
 
-  // Texto simples para WhatsApp
   const textoWA=`*${tipoDoc} Nº ${os.numero||"001"}*\n*${emp.nome||"Prótons Serviços Elétricos"}*\n\n*Cliente:* ${os.clienteNome||"—"}\n*Local:* ${os.local||"—"}\n*Data:* ${os.data||hoje()}\n*Pagamento:* ${os.pagamento||"—"}\n\n*Serviços:*\n${(os.itens||[]).map(i=>`• ${i.n} (${i.q}x) — R$${fmtN(i.q*i.v)}`).join("\n")}\n\n*TOTAL: R$${fmtN(total)}*\n${os.obs?"\n*Obs:* "+os.obs:""}`;
 
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${tipoDoc} ${os.numero||"001"}</title><style>
@@ -364,11 +355,8 @@ function gerarDocumento(os,emp,tipoDoc){
   </div></div>
   ${os.obs?`<div style="margin-top:14px;background:#f8f8f8;border-radius:8px;padding:12px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:4px">OBSERVAÇÕES</div><div style="font-size:13px">${os.obs}</div></div>`:""}
   <div class="assinatura">${emp.nome||"Prótons Serviços Elétricos"}${emp.crea?"<br>CREA: "+emp.crea:""}</div>
-
-  <!-- Botões de compartilhamento -->
   <button class="btn-share" onclick="compartilhar()">💬 Compartilhar no WhatsApp</button>
   <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
-
   <script>
     const textoDoc = ${JSON.stringify(textoWA)};
     function compartilhar(){
@@ -383,65 +371,6 @@ function gerarDocumento(os,emp,tipoDoc){
   </script>
   </body></html>`;
 
-  try{
-    const w=window.open("","_blank");
-    if(!w){alert("Habilite pop-ups para visualizar o documento.");return;}
-    w.document.write(html);w.document.close();
-  }catch(e){alert("Erro: "+e.message);}
-}
-  const itens=(os.itens||[]).map(s=>`<tr><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0">${s.n}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:center">${s.q}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right">R$${Number(s.v).toFixed(2).replace(".",",")}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:700">R$${(s.q*s.v).toFixed(2).replace(".",",")}</td></tr>`).join("");
-  const total=(os.itens||[]).reduce((a,b)=>a+b.q*b.v,0)-(Number(os.desconto)||0);
-  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${tipoDoc} ${os.numero||"001"}</title><style>
-  body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:28px;max-width:720px;margin:0 auto;}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a1a;padding-bottom:16px;margin-bottom:20px;}
-  .empresa{font-size:18px;font-weight:900;color:#1a1a1a;margin-bottom:4px;}
-  .sub{font-size:11px;color:#666;margin-top:2px;}
-  .titulo{background:#1a1a1a;color:#F5C518;padding:10px 14px;font-size:16px;font-weight:900;border-radius:6px;margin-bottom:16px;}
-  table{width:100%;border-collapse:collapse;margin-bottom:16px;}
-  th{background:#f5f5f5;padding:9px 6px;text-align:left;font-size:12px;color:#555;font-weight:700;border-bottom:2px solid #e5e5e5;}
-  .info{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;}
-  .info-box{background:#f8f8f8;border-radius:8px;padding:12px;}
-  .info-label{font-size:10px;color:#888;font-weight:700;text-transform:uppercase;margin-bottom:4px;}
-  .info-val{font-size:13px;font-weight:700;color:#333;}
-  .total-box{display:flex;justify-content:flex-end;margin-top:8px;}
-  .total-inner{min-width:220px;border-top:2px solid #1a1a1a;padding-top:10px;}
-  .total-row{display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;}
-  .total-final{display:flex;justify-content:space-between;font-size:19px;font-weight:900;}
-  .assinatura{margin-top:60px;text-align:center;border-top:1px solid #ccc;padding-top:10px;font-size:12px;color:#555;}
-  @media print{body{padding:0;}}
-  </style></head><body>
-  <div class="header">
-    <div>
-      <div class="empresa">⚡ ${emp.nome||"Prótons Serviços Elétricos"}</div>
-      <div class="sub">${emp.cnpj?"CNPJ: "+emp.cnpj:""}${emp.crea?" · CREA: "+emp.crea:""}</div>
-      <div class="sub">${emp.tel||""}${emp.email?" · "+emp.email:""}</div>
-      <div class="sub">${emp.endereco||""}</div>
-    </div>
-    <div style="text-align:right;font-size:12px;color:#888">
-      <div>Nº ${os.numero||"001"}</div>
-      <div>${os.data||hoje()}</div>
-    </div>
-  </div>
-  <div class="titulo">${tipoDoc}</div>
-  <div class="info">
-    <div class="info-box"><div class="info-label">Cliente</div><div class="info-val">${os.clienteNome||"—"}</div><div class="sub">${os.clienteTel||""}</div></div>
-    <div class="info-box"><div class="info-label">Local / Endereço</div><div class="info-val">${os.local||"—"}</div></div>
-    <div class="info-box"><div class="info-label">Forma de Pagamento</div><div class="info-val">${os.pagamento||"—"}</div></div>
-    <div class="info-box"><div class="info-label">Vencimento</div><div class="info-val">${os.vencimento||"—"}</div></div>
-  </div>
-  ${os.descricao?`<div style="background:#fef9c3;border-left:4px solid #F5C518;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:13px">${os.descricao}</div>`:""}
-  <table>
-    <thead><tr><th>Descrição</th><th style="text-align:center">Qtd</th><th style="text-align:right">Unitário</th><th style="text-align:right">Total</th></tr></thead>
-    <tbody>${itens}</tbody>
-  </table>
-  <div class="total-box"><div class="total-inner">
-    ${Number(os.desconto)>0?`<div class="total-row"><span>Desconto</span><span style="color:#ef4444">- R$${Number(os.desconto).toFixed(2).replace(".",",")}</span></div>`:""}
-    ${Number(os.sinal)>0?`<div class="total-row"><span>Sinal/Entrada</span><span>R$${Number(os.sinal).toFixed(2).replace(".",",")}</span></div>`:""}
-    <div class="total-final"><span>TOTAL</span><span style="color:#C9A227">R$${total.toFixed(2).replace(".",",")}</span></div>
-  </div></div>
-  ${os.obs?`<div style="margin-top:16px;background:#f8f8f8;border-radius:8px;padding:12px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:4px">OBSERVAÇÕES</div><div style="font-size:13px;color:#555">${os.obs}</div></div>`:""}
-  <div class="assinatura">${emp.nome||"Prótons Serviços Elétricos"}<br>${emp.crea?"CREA: "+emp.crea:""}</div>
-  </body></html>`;
   try{
     const w=window.open("","_blank");
     if(!w){alert("Habilite pop-ups para visualizar o documento.");return;}
@@ -569,7 +498,6 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
   const nome = usuario?.nome?.split(" ")[0]||"Eletricista";
 
   useEffect(()=>{
-    // Aguarda vozes carregarem antes de falar
     const intro=`Olá ${nome}! Eu sou ${nomeAssistente}, sua assistente inteligente do Prótons Prospect! Pode me perguntar qualquer coisa sobre o app. Estou ouvindo!`;
     setMsg(intro);
     setHist([{de:"ia",txt:intro}]);
@@ -579,7 +507,6 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
     return()=>clearTimeout(timer);
   },[]);
 
-  // Auto-scroll para última mensagem
   useEffect(()=>{
     if(histRef.current){
       histRef.current.scrollTop=histRef.current.scrollHeight;
@@ -613,9 +540,7 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div style={{background:"#fff",borderRadius:24,padding:20,maxWidth:400,width:"100%",maxHeight:"85vh",display:"flex",flexDirection:"column",animation:"fadeUp .4s ease"}}>
-        {/* Header */}
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,paddingBottom:14,borderBottom:"1px solid #f0f0f0"}}>
-          {/* Átomo animado */}
           <div style={{position:"relative",width:52,height:52,flexShrink:0}}>
             <div style={{position:"absolute",inset:0,borderRadius:"50%",background:`conic-gradient(${GOLD},${GOLD2},${GOLD})`,animation:"giro "+(falando?"1s":"6s")+" linear infinite",padding:2}}>
               <div style={{width:"100%",height:"100%",borderRadius:"50%",background:"#fff"}}/>
@@ -635,7 +560,6 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
           <button onClick={onClose} style={{width:32,height:32,borderRadius:"50%",background:"#f5f5f5",border:"none",fontSize:16,color:"#888",cursor:"pointer"}}>✕</button>
         </div>
 
-        {/* Histórico */}
         <div ref={histRef} style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,marginBottom:14,maxHeight:280}}>
           {hist.map((h,i)=>(
             <div key={i} style={{display:"flex",justifyContent:h.de==="user"?"flex-end":"flex-start"}}>
@@ -646,7 +570,6 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
           ))}
         </div>
 
-        {/* Input */}
         <div style={{display:"flex",gap:8}}>
           <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>e.key==="Enter"&&enviarTexto()} placeholder="Digite ou use o microfone..." style={{flex:1,background:"#f8f8f8",border:`1.5px solid ${ouvindo?GOLD:"#e5e5e5"}`,color:"#333",borderRadius:12,padding:"12px 14px",fontSize:14,outline:"none"}}/>
           <button onClick={ativarMic} style={{width:46,height:46,borderRadius:12,border:"none",background:ouvindo?`linear-gradient(135deg,${GOLD},${GOLD2})`:"#f5f5f5",color:ouvindo?"#1a1a1a":"#888",fontSize:20,flexShrink:0,animation:ouvindo?"mic 1s infinite":"none"}}>🎙️</button>
@@ -659,7 +582,6 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
 
 // ── APP PRINCIPAL ─────────────────────────────────────────────
 export default function App(){
-  // TODOS OS HOOKS PRIMEIRO
   const [usuario,      setUsuario]      = useState(()=>{try{const s=sessionStorage.getItem("protons_u");return s?JSON.parse(s):null;}catch{return null;}});
   const [nomeAssist,   setNomeAssist]   = useState(()=>sessionStorage.getItem("protons_assist")||"ÍRIS");
   const [showIA,       setShowIA]       = useState(false);
@@ -752,25 +674,20 @@ export default function App(){
     }
   },[usuario]);
 
-  // Carrega dados do Supabase ao fazer login
   useEffect(()=>{
     if(!usuario?.id)return;
-    // Carrega OS salvas
     dbGet("ordens_servico","usuario_id",usuario.id).then(rows=>{
       if(rows&&rows.length>0){
         const os=rows.map(r=>({...r,itens:r.itens_json?JSON.parse(r.itens_json):(r.itens||[])}));
         setOrdens(os);
       }
     }).catch(()=>{});
-    // Carrega clientes
     dbGet("clientes","usuario_id",usuario.id).then(rows=>{
       if(rows&&rows.length>0)setClientes(rows);
     }).catch(()=>{});
-    // Carrega créditos atualizados
     buscarCreditos(usuario.email).then(c=>setCreditos(c)).catch(()=>{});
   },[usuario?.id]);
 
-  // Financeiro
   const finAtual = tipoFin==="empresa"?finEmp:tipoFin==="pessoal"?finPes:finObra;
   const setFinAtual = tipoFin==="empresa"?setFinEmp:tipoFin==="pessoal"?setFinPes:setFinObra;
   const mesH=new Date().getMonth(), anoH=new Date().getFullYear();
@@ -779,7 +696,6 @@ export default function App(){
   const saldo=recM-despM;
   const g6m=Array.from({length:6},(_,i)=>{const m=(mesH-5+i+12)%12,a=m>mesH?anoH-1:anoH;return{l:MESES[m],v:finAtual.filter(f=>f.tipo==="receita"&&new Date(f.data).getMonth()===m&&new Date(f.data).getFullYear()===a).reduce((a,b)=>a+b.valor,0)};});
 
-  // OS
   function abrirOS(tipo){setEditOSId(null);setFormOS({numero:String(ordens.length+1).padStart(3,"0"),tipo:tipo||"orcamento",status:"orcamento",data:hoje(),pagamento:"À vista",clienteId:"",clienteNome:"",clienteTel:"",clienteEnd:"",local:"",descricao:"",obs:"",termos:"",desconto:0,sinal:0});setItensOS([]);setIN("");setIV("");setIQ("1");setModalOS(true);}
   function editOS(o){setEditOSId(o.id);setFormOS({...o});setItensOS(o.itens||[]);setIN("");setIV("");setIQ("1");setModalOS(true);}
   function addItem(){if(!iN||!iV)return;setItensOS(p=>[...p,{id:uid(),n:iN,v:Number(iV),q:Number(iQ||1)}]);setIN("");setIV("");setIQ("1");}
@@ -788,7 +704,6 @@ export default function App(){
     const sub=itensOS.reduce((a,b)=>a+b.q*b.v,0);
     const total=sub-(Number(formOS.desconto)||0);
     const o={...formOS,id:editOSId||uid(),itens:itensOS,subtotal:sub,total,usuario_id:usuario.id,criado_em:new Date().toISOString()};
-    // Salva no Supabase
     try{
       if(editOSId){
         await dbUpd("ordens_servico","id",editOSId,{...o,itens_json:JSON.stringify(o.itens),atualizado_em:new Date().toISOString()});
@@ -798,7 +713,6 @@ export default function App(){
         setOrdens(p=>[o,...p]);
       }
     }catch{
-      // Fallback local se Supabase falhar
       if(editOSId)setOrdens(p=>p.map(x=>x.id===editOSId?o:x));
       else setOrdens(p=>[o,...p]);
     }
@@ -811,7 +725,6 @@ export default function App(){
     setModalOS(false);showWarn("OS removida.");
   }
 
-  // Mapeamento de Obra
   function gerarOrcamentoObra(obra){
     const itens=[];
     (obra.comodos||[]).forEach(c=>{
@@ -828,7 +741,6 @@ export default function App(){
     setTab("os");
   }
 
-  // Prospecção
   function iniciarScan(){
     if(pScan||!pCidade.trim()){showWarn("Digite o nome da cidade.");return;}
     setPDone(false);setPPct(0);setPEmps([]);setPScan(true);
@@ -847,27 +759,22 @@ export default function App(){
         setPDone(true);return;
       }
 
-      // Suporta resposta v5 e v4
       const lista=res.cnpjs||res.data||[];
 
       function extrairTel(e){
-        // v5 completo: telefones[]
         if(e.telefones?.length>0){
           const t=e.telefones[0];
           const ddd=(t.ddd||"").toString().replace(/\D/g,"");
           const num=(t.numero||t.telefone||"").toString().replace(/\D/g,"");
           if(ddd&&num)return"("+ddd+") "+num;
         }
-        // v5 simples: ddd_telefone_1 = "11912345678"
         if(e.ddd_telefone_1){
           const s=String(e.ddd_telefone_1).replace(/\D/g,"");
           if(s.length>=10)return"("+s.slice(0,2)+") "+s.slice(2);
         }
-        // v4: ddd1 + telefone1
         if(e.ddd1&&e.telefone1){
           return"("+String(e.ddd1).replace(/\D/g,"")+") "+String(e.telefone1).replace(/\D/g,"");
         }
-        // Qualquer campo com "telefone"
         const campos=["telefone","telefone1","fone","celular","whatsapp"];
         for(const c of campos){
           if(e[c]){const n=String(e[c]).replace(/\D/g,"");if(n.length>=8)return n;}
@@ -877,11 +784,9 @@ export default function App(){
 
       function extrairEnd(e){
         const end=e.endereco||{};
-        // v5
         if(end.logradouro){
           return[end.tipo_logradouro,end.logradouro,end.numero,end.complemento,end.bairro,end.municipio,end.uf].filter(Boolean).join(", ");
         }
-        // v4
         return[e.logradouro,e.numero,e.complemento,e.bairro,e.municipio||e.cidade,e.uf].filter(Boolean).join(", ");
       }
 
@@ -901,7 +806,6 @@ export default function App(){
       setPDone(true);
 
       if(emps.length===0){
-        // Mostra informação sobre o que a API retornou
         if(lista.length>0){
           showWarn("Empresas encontradas mas sem telefone. Tente outro segmento ou cidade.");
         } else if(res.debug_v5||res.debug_v4){
@@ -932,7 +836,6 @@ export default function App(){
     showOk("WhatsApp aberto — "+e.nome);
   }
 
-  // Fotos visita
   function adicionarFoto(e){
     const files=Array.from(e.target.files);
     if(!files.length)return;
@@ -969,10 +872,8 @@ export default function App(){
     <div style={{minHeight:"100vh",background:"#f5f5f5",fontFamily:"'Nunito',sans-serif",color:DARK,overflowX:"hidden",paddingBottom:80}}>
       <style>{CSS}</style>
 
-      {/* TOAST */}
       {toast&&<div style={{position:"fixed",top:14,left:"50%",transform:"translateX(-50%)",zIndex:9999,background:toast.t==="w"?"#1a0800":"#0a1a0a",border:"2px solid "+(toast.t==="w"?"#f59e0b":"#10b981"),borderRadius:12,padding:"11px 20px",fontSize:14,color:toast.t==="w"?"#f59e0b":"#10b981",fontWeight:700,whiteSpace:"nowrap",boxShadow:"0 8px 32px rgba(0,0,0,.3)",animation:"fadeUp .3s ease"}}>{toast.t==="w"?"⚠️ ":"✅ "}{toast.m}</div>}
 
-      {/* MODAL NOME IA */}
       {showNomeIA&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:998,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
         <div style={{background:"#fff",borderRadius:24,padding:28,maxWidth:360,width:"100%",textAlign:"center"}}>
           <div style={{fontSize:40,marginBottom:12}}>🧠</div>
@@ -985,10 +886,8 @@ export default function App(){
         </div>
       </div>}
 
-      {/* ASSISTENTE IA */}
       {showIA&&<AssistenteModal nomeAssistente={nomeAssist} usuario={usuario} onClose={()=>setShowIA(false)}/>}
 
-      {/* MENU LATERAL */}
       {menuOpen&&<div style={{position:"fixed",inset:0,zIndex:800,display:"flex"}} onClick={()=>setMenuOpen(false)}>
         <div style={{width:280,background:"#fff",height:"100%",boxShadow:"4px 0 20px rgba(0,0,0,.15)",padding:20,display:"flex",flexDirection:"column",gap:6,overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
           <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,paddingBottom:14,borderBottom:"1px solid #f0f0f0"}}>
@@ -1008,7 +907,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* HEADER */}
       <div style={{background:"#fff",borderBottom:"1px solid #f0f0f0",padding:"13px 16px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:200,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
         <button onClick={()=>setMenuOpen(true)} style={{width:38,height:38,borderRadius:10,border:"none",background:"#f5f5f5",color:"#333",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>☰</button>
         <div style={{flex:1,textAlign:"center"}}>
@@ -1021,7 +919,6 @@ export default function App(){
 
       <div style={{maxWidth:620,margin:"0 auto",padding:"14px",display:"flex",flexDirection:"column",gap:12}}>
 
-        {/* ── INÍCIO ── */}
         {tab==="inicio"&&<>
           <div style={{background:`linear-gradient(135deg,${DARK} 0%,#2a2000 100%)`,borderRadius:18,padding:"18px 20px",cursor:"pointer"}} onClick={()=>setTab("prosp")}>
             <div style={{fontSize:12,color:GOLD,fontWeight:800,marginBottom:4}}>⚡ PRÓTONS PROSPECT</div>
@@ -1050,7 +947,6 @@ export default function App(){
           </div>
         </>}
 
-        {/* ── OS ── */}
         {tab==="os"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>📋 OS / Orçamentos</div>
@@ -1078,9 +974,7 @@ export default function App(){
           );})}
         </>}
 
-        {/* ── PROSPECÇÃO ── */}
         {tab==="prosp"&&<>
-          {/* Banner créditos */}
           <div style={{background:`linear-gradient(135deg,${DARK},#2a2000)`,borderRadius:16,padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
             <div style={{fontSize:28}}>📡</div>
             <div style={{flex:1}}>
@@ -1106,7 +1000,7 @@ export default function App(){
                 <label className="lbl">Cidade (qualquer cidade do Brasil)</label>
                 <input className="inp" value={pCidade} onChange={e=>{setPCidade(e.target.value);setPDone(false);setPEmps([]);}} placeholder="Ex: Recife, Manaus, Goiânia..." list="cidades-br"/>
                 <datalist id="cidades-br">
-                  {["São Paulo","Rio de Janeiro","Brasília","Salvador","Fortaleza","Belo Horizonte","Manaus","Curitiba","Recife","Porto Alegre","Goiânia","Belém","Guarulhos","Campinas","São Luís","São Gonçalo","Maceió","Duque de Caxias","Natal","Campo Grande","Teresina","São Bernardo do Campo","Nova Iguaçu","João Pessoa","Santo André","Osasco","São José dos Campos","Jaboatão dos Guararapes","Ribeirão Preto","Uberlândia","Sorocaba","Contagem","Aracaju","Feira de Santana","Cuiabá","Joinville","Juiz de Fora","Aparecida de Goiânia","Londrina","Ananindeua","Porto Velho","Serra","Caxias do Sul","Macapá","Florianópolis","Mogi das Cruzes","Santos","São José do Rio Preto","Mauá","Betim","Montes Claros","Caruaru","São João de Meriti","Franca","Pelotas","Carapicuíba","Olinda","Campina Grande","Bauru","Blumenau","Vitória","Canoas","Niterói","São Vicente","Diadema","Belford Roxo","Jundiaí","Anápolis","Piracicaba","Cariacica","Caucaia","Vila Velha","Maringá","Moji-Guaçu","Santos Dumont","Ribeirão das Neves","Valparaíso de Goiás","Luziânia","Águas Lindas de Goiás","Senador Canedo","Trindade"].map(c=><option key={c} value={c}/>)}
+                  {["São Paulo","Rio de Janeiro","Brasília","Salvador","Fortaleza","Belo Horizonte","Manaus","Curitiba","Recife","Porto Alegre","Goiânia","Belém","Guarulhos","Campinas","São Luís","São Gonçalo","Maceió","Duque de Caxias","Natal","Campo Grande","Teresina","São Bernardo do Campo","Nova Iguaçu","João Pessoa","Santo André","Osasco","São José dos Campos","Jaboatão dos Guararapes","Ribeirão Preto","Uberlândia","Sorocaba","Contagem","Aracaju","Feira de Santana","Cuiabá","Joinville","Juiz de Fora","Aparecida de Goiânia","Londrina","Ananindeua","Porto Velho","Serra","Caxias do Sul","Macapá","Florianópolis","Mogi das Cruzes","Santos","São José do Rio Preto","Mauá","Betim","Montes Claros","Caruaru","São João de Meriti","Franca","Pelotas","Carapicuíba","Olinda","Campina Grande","Bauru","Blumenau","Vitória","Canoas","Niterói","São Vicente","Diadema","Belford Roxo","Jundiaí","Anápolis","Piracicaba","Cariacica","Caucaia","Vila Velha","Maringá","Valparaíso de Goiás","Luziânia","Águas Lindas de Goiás","Senador Canedo","Trindade"].map(c=><option key={c} value={c}/>)}
                 </datalist>
               </div>
               <div><label className="lbl">Bairro (opcional)</label><input className="inp" value={pBairro} onChange={e=>{setPBairro(e.target.value);setPDone(false);setPEmps([]);}} placeholder="Ex: Centro, Boa Viagem, Copacabana..."/></div>
@@ -1162,13 +1056,11 @@ export default function App(){
           </div>}
         </>}
 
-        {/* ── FINANCEIRO ── */}
         {tab==="fin"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>💰 Financeiro</div>
             <button className="btn btn-gold" onClick={()=>setModalFin(true)} style={{fontSize:12,padding:"9px 12px"}}>+ Lançar</button>
           </div>
-          {/* Abas financeiro */}
           <div style={{display:"flex",background:"#fff",borderRadius:12,padding:4,gap:4,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
             {[{id:"empresa",l:"🏢 Empresa"},{id:"pessoal",l:"👤 Pessoal"},{id:"obra",l:"🏗️ Por Obra"}].map(t=>(
               <button key={t.id} onClick={()=>setTipoFin(t.id)} style={{flex:1,padding:"10px",borderRadius:9,border:"none",background:tipoFin===t.id?`linear-gradient(135deg,${GOLD},${GOLD2})`:"transparent",color:tipoFin===t.id?"#1a1a1a":"#888",fontSize:12,fontWeight:800,cursor:"pointer"}}>{t.l}</button>
@@ -1196,7 +1088,6 @@ export default function App(){
           </div>
         </>}
 
-        {/* ── CLIENTES ── */}
         {tab==="clientes"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>👥 Clientes</div>
@@ -1216,7 +1107,6 @@ export default function App(){
           ))}
         </>}
 
-        {/* ── ESTOQUE ── */}
         {tab==="estoque"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>📦 Estoque</div>
@@ -1236,7 +1126,6 @@ export default function App(){
           ))}
         </>}
 
-        {/* ── AGENDA ── */}
         {tab==="agenda"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>📅 Agenda</div>
@@ -1256,7 +1145,6 @@ export default function App(){
           ))}
         </>}
 
-        {/* ── MAPA DE OBRA ── */}
         {tab==="obra"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>🏗️ Mapa de Obra</div>
@@ -1269,7 +1157,6 @@ export default function App(){
                 <div><div style={{fontSize:15,fontWeight:800}}>{o.nome}</div><div style={{fontSize:11,color:"#888"}}>{o.cliente&&"👤 "+o.cliente} {o.endereco&&"· 📍 "+o.endereco}</div></div>
                 <span style={{background:"#ffedd5",color:"#ea580c",borderRadius:8,padding:"3px 9px",fontSize:11,fontWeight:800}}>{(o.comodos||[]).length} cômodos</span>
               </div>
-              {/* Cômodos */}
               {(o.comodos||[]).map(c=>(
                 <div key={c.id} style={{background:"#f8f8f8",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
                   <div style={{fontSize:13,fontWeight:800,marginBottom:6,color:"#333"}}>🏠 {c.nome}</div>
@@ -1293,7 +1180,6 @@ export default function App(){
           ))}
         </>}
 
-        {/* ── VISITAS TÉCNICAS ── */}
         {tab==="visita"&&<>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple style={{display:"none"}} onChange={adicionarFoto}/>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1324,10 +1210,8 @@ export default function App(){
           ))}
         </>}
 
-        {/* ── CALCULADORA ── */}
         {tab==="calc"&&<CalculadoraEletrica/>}
 
-        {/* ── SERVIÇOS ── */}
         {tab==="servicos"&&<>
           <div style={{fontSize:18,fontWeight:900}}>🔧 Tabela de Serviços</div>
           <div className="card" style={{padding:14}}>
@@ -1346,7 +1230,6 @@ export default function App(){
           </div>
         </>}
 
-        {/* ── CRM ── */}
         {tab==="crm"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>🤝 CRM</div>
@@ -1373,7 +1256,6 @@ export default function App(){
           })}
         </>}
 
-        {/* ── CONFIG ── */}
         {tab==="cfg"&&<>
           <div style={{fontSize:18,fontWeight:900}}>⚙️ Configurações</div>
           <div className="card" style={{padding:14}}>
@@ -1394,7 +1276,6 @@ export default function App(){
 
       </div>
 
-      {/* BARRA INFERIOR */}
       <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid #f0f0f0",display:"flex",zIndex:100,boxShadow:"0 -2px 12px rgba(0,0,0,.08)"}}>
         {[{id:"inicio",em:"🏠",l:"Início"},{id:"prosp",em:"📡",l:"Prospecção"},{id:"os",em:"📋",l:"OS"},{id:"clientes",em:"👥",l:"Clientes"},{id:"calc",em:"⚡",l:"Calculadora"}].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"10px 4px",border:"none",background:"none",color:tab===t.id?GOLD2:"#aaa",borderTop:`3px solid ${tab===t.id?GOLD:"transparent"}`,cursor:"pointer"}}>
@@ -1404,10 +1285,8 @@ export default function App(){
         ))}
       </div>
 
-      {/* BOTÃO FLUTUANTE */}
       <button onClick={()=>abrirOS()} style={{position:"fixed",bottom:78,right:18,width:52,height:52,borderRadius:"50%",background:`linear-gradient(135deg,${GOLD},${GOLD2})`,border:"none",color:"#1a1a1a",fontSize:24,fontWeight:900,boxShadow:`0 4px 20px ${GOLD}60`,zIndex:150,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
 
-      {/* CALCULADORA MODAL */}
       {modalCalc&&<div className="mbg" onClick={()=>setModalCalc(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()} style={{maxHeight:"95vh"}}>
           <div className="hdl"/>
@@ -1417,7 +1296,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL OS */}
       {modalOS&&<div className="mbg" onClick={()=>setModalOS(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1454,7 +1332,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL CLIENTE */}
       {modalCli&&<div className="mbg" onClick={()=>setModalCli(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1467,7 +1344,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL FINANCEIRO */}
       {modalFin&&<div className="mbg" onClick={()=>setModalFin(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1487,7 +1363,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL AGENDA */}
       {modalAge&&<div className="mbg" onClick={()=>setModalAge(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1504,7 +1379,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL NOVA OBRA */}
       {modalObra&&<div className="mbg" onClick={()=>setModalObra(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1517,7 +1391,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL CÔMODO */}
       {modalComodo&&<div className="mbg" onClick={()=>setModalComodo(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1542,7 +1415,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL VISITA */}
       {modalVisita&&<div className="mbg" onClick={()=>setModalVisita(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1557,7 +1429,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL CONTATO */}
       {modalCon&&<div className="mbg" onClick={()=>setModalCon(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1572,7 +1443,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL CRÉDITOS */}
       {modalCreditos&&<div className="mbg" onClick={()=>{setModalCreditos(false);setPagamento(null);setPagandoPacote(null);}}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1580,7 +1450,6 @@ export default function App(){
           <div style={{fontSize:13,color:"#888",marginBottom:16}}>Seus créditos: <b style={{color:GOLD2}}>{creditos} contatos</b></div>
 
           {!pagamento?<>
-            {/* Pacotes */}
             {PACOTES.map(p=>(
               <div key={p.creditos} onClick={()=>setPagandoPacote(p)} style={{background:pagandoPacote?.creditos===p.creditos?"#fef9c3":"#f8f8f8",border:`2px solid ${pagandoPacote?.creditos===p.creditos?GOLD:"#e5e5e5"}`,borderRadius:14,padding:"14px 16px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14,transition:"all .2s"}}>
                 <div style={{width:46,height:46,borderRadius:12,background:p.cor+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>📡</div>
@@ -1617,7 +1486,6 @@ export default function App(){
             <button className="btn btn-ghost" onClick={()=>setModalCreditos(false)} style={{width:"100%",fontSize:13,padding:"12px"}}>Cancelar</button>
 
           </>:<>
-            {/* QR Code PIX */}
             <div style={{textAlign:"center",marginBottom:16}}>
               <div style={{fontSize:14,fontWeight:800,color:DARK,marginBottom:8}}>📱 Escaneie o QR Code PIX</div>
               {pagamento.pix_qrcode&&<img src={"data:image/png;base64,"+pagamento.pix_qrcode} alt="QR Code PIX" style={{width:200,height:200,borderRadius:12,border:`2px solid ${GOLD}`,margin:"0 auto 12px",display:"block"}}/>}
@@ -1646,7 +1514,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL ESTOQUE */}
       {modalEst&&<div className="mbg" onClick={()=>setModalEst(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
@@ -1669,7 +1536,6 @@ export default function App(){
         </div>
       </div>}
 
-      {/* MODAL PDF */}
       {modalPDF&&osPDF&&<div className="mbg" onClick={()=>setModalPDF(false)}>
         <div className="mdl" onClick={e=>e.stopPropagation()}>
           <div className="hdl"/>
