@@ -1,14 +1,8 @@
-// api/pagar.js — Cria cobrança PIX no Asaas
-const ASAAS_KEY = "$aact_prod_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OmM2OWU0YTNmLWVmYTQtNDhjOC04ZmU3LTdjNDczMDIzOGI0Yzo6JGFhY2hfNjBhZmMyMTQtZGQ5ZS00ZDI4LTgwN2UtZTdmNWVmNTJmNDZl";
-const ASAAS_URL = "https://api.asaas.com/v3";
+// api/buscar.js — Proxy Casa dos Dados com polling de arquivo
+const API_KEY = "64b4a4ee0c6a8f0c68c1fd3b8a802377edaa123d2de0dba7afb356bd8d165b55c496506456420da93d6483203b2713d322e658fca01e62ff3cd86b6476cbf043";
+const BASE    = "https://api.casadosdados.com.br";
 
-const PACOTES = {
-  20:  { valor: 27.00,  creditos: 20,  descricao: "Protons Prospect - 20 contatos" },
-  50:  { valor: 47.00,  creditos: 50,  descricao: "Protons Prospect - 50 contatos" },
-  200: { valor: 147.00, creditos: 200, descricao: "Protons Prospect - 200 contatos" },
-};
-
-const H = { "access_token": ASAAS_KEY, "Content-Type": "application/json" };
+async function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -18,79 +12,93 @@ export default async function handler(req, res) {
   if (req.method !== "POST")   return res.status(405).json({ erro: "Método não permitido" });
 
   try {
-    const { email, nome, creditos, cpf } = req.body || {};
-    if (!email || !creditos) return res.status(400).json({ erro: "Email e creditos sao obrigatorios" });
+    const { municipio, codigo_atividade_principal, bairro } = req.body;
 
-    const pacote = PACOTES[Number(creditos)];
-    if (!pacote) return res.status(400).json({ erro: "Pacote invalido. Use 20, 50 ou 200" });
+    // ── PASSO 1: Pesquisa direta v5 ──────────────────────────
+    const pesqBody = {
+      codigo_atividade_principal: codigo_atividade_principal || [],
+      situacao_cadastral: ["ATIVA"],
+      municipio: municipio || [],
+      ...(bairro && bairro.length ? { bairro } : {}),
+      mais_filtros: {
+        com_telefone: true,
+        somente_matriz: true,
+        excluir_email_contab: true,
+      },
+      limite: 20,
+      pagina: 1,
+    };
 
-    // 1. Busca cliente existente pelo externalReference (email)
-    let clienteId = null;
-    try {
-      const bResp = await fetch(`${ASAAS_URL}/customers?externalReference=${encodeURIComponent(email)}&limit=1`, { headers: H });
-      const bData = await bResp.json();
-      clienteId = bData?.data?.[0]?.id || null;
-    } catch {}
+    const pesqResp = await fetch(`${BASE}/v5/cnpj/pesquisa?tipo_resultado=completo`, {
+      method: "POST",
+      headers: { "api-key": API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify(pesqBody),
+    });
 
-    // 2. Cria cliente se não existir
-    if (!clienteId) {
-      const clienteBody = {
-        name: (nome || email.split("@")[0]).slice(0, 100),
-        email: email.toLowerCase().trim(),
-        externalReference: email,
-      };
-      // CPF melhora aprovação no Asaas
-      if (cpf) clienteBody.cpfCnpj = cpf.replace(/\D/g, "");
+    const pesqData = await pesqResp.json();
+    console.log("v5 status:", pesqResp.status, "total:", pesqData?.total, "cnpjs:", pesqData?.cnpjs?.length);
 
-      const cResp = await fetch(`${ASAAS_URL}/customers`, {
-        method: "POST", headers: H,
-        body: JSON.stringify(clienteBody),
-      });
-      const cData = await cResp.json();
-      console.log("Cliente Asaas:", JSON.stringify(cData));
-      if (!cData.id) return res.status(500).json({ erro: "Erro ao criar cliente no Asaas", detalhe: cData });
-      clienteId = cData.id;
+    // Se retornou dados direto, usa eles
+    if (pesqData?.cnpjs && pesqData.cnpjs.length > 0) {
+      return res.status(200).json({ sucesso: true, cnpjs: pesqData.cnpjs, total: pesqData.total, fonte: "v5-direto" });
     }
 
-    // 3. Cria cobrança PIX
-    const vencimento = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().split("T")[0];
-    const pResp = await fetch(`${ASAAS_URL}/payments`, {
-      method: "POST", headers: H,
-      body: JSON.stringify({
-        customer:          clienteId,
-        billingType:       "PIX",
-        value:             pacote.valor,
-        dueDate:           vencimento,
-        description:       pacote.descricao,
-        externalReference: email,
-      }),
+    // ── PASSO 2: Tenta v4 como fallback ──────────────────────
+    const v4Body = {
+      query: {
+        termo: [],
+        atividade_principal: (codigo_atividade_principal || []).map(c => ({ codigo: c })),
+        natureza_juridica: [],
+        uf: [],
+        municipio: (municipio || []).map(m => ({ codigo: m, descricao: m })),
+        bairro: (bairro || []).map(b => ({ nome: b })),
+        situacao_cadastral: "ATIVA",
+        cep: [],
+        ddd: [],
+      },
+      range_query: {
+        data_abertura: { lte: null, gte: null },
+        capital_social: { lte: null, gte: null },
+      },
+      extras: {
+        somente_mei: false,
+        excluir_mei: true,
+        com_email: false,
+        incluir_atividade_secundaria: false,
+        com_contato_telefonico: true,
+        somente_fixo: false,
+        somente_celular: false,
+        somente_matriz: true,
+        somente_filial: false,
+      },
+      page: 1,
+    };
+
+    const v4Resp = await fetch(`${BASE}/v2/public/cnpj/search`, {
+      method: "POST",
+      headers: { "api-key": API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify(v4Body),
     });
-    const pData = await pResp.json();
-    console.log("Cobranca Asaas:", JSON.stringify(pData));
-    if (!pData.id) return res.status(500).json({ erro: "Erro ao gerar cobranca PIX", detalhe: pData });
 
-    // 4. Busca QR Code PIX
-    let pixPayload = "", pixQrcode = "";
-    try {
-      const qResp = await fetch(`${ASAAS_URL}/payments/${pData.id}/pixQrCode`, { headers: H });
-      const qData = await qResp.json();
-      pixPayload = qData.payload    || "";
-      pixQrcode  = qData.encodedImage || "";
-    } catch {}
+    const v4Data = await v4Resp.json();
+    console.log("v4 status:", v4Resp.status, "data:", JSON.stringify(v4Data).slice(0, 200));
 
+    if (v4Data?.data && v4Data.data.length > 0) {
+      return res.status(200).json({ sucesso: true, cnpjs: v4Data.data, total: v4Data.count || v4Data.data.length, fonte: "v4" });
+    }
+
+    // Retorna o que tiver mesmo que vazio para diagnóstico
     return res.status(200).json({
-      ok:              true,
-      cobranca_id:     pData.id,
-      valor:           pacote.valor,
-      creditos:        pacote.creditos,
-      pix_copia_cola:  pixPayload,
-      pix_qrcode:      pixQrcode,
-      link_pagamento:  pData.invoiceUrl || "",
-      vencimento,
+      sucesso: true,
+      cnpjs: [],
+      total: 0,
+      fonte: "sem-resultado",
+      debug_v5: { status: pesqResp.status, total: pesqData?.total, erro: pesqData?.erro || pesqData?.message },
+      debug_v4: { status: v4Resp.status, count: v4Data?.count, erro: v4Data?.erro || v4Data?.message },
     });
 
-  } catch (e) {
-    console.error("pagar.js erro:", e.message);
-    return res.status(500).json({ erro: "Erro interno", detalhe: e.message });
+  } catch (erro) {
+    console.error("Erro buscar.js:", erro.message);
+    return res.status(500).json({ erro: "Erro interno", detalhe: erro.message });
   }
 }
