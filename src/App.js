@@ -23,28 +23,67 @@ async function fazerLogin(email,senha){const rows=await dbGet("usuarios","email"
 async function fazerCadastro(nome,email,senha){const ex=await dbGet("usuarios","email",email.toLowerCase().trim());if(ex&&ex.length>0)return{erro:"E-mail já cadastrado."};const u=await dbIns("usuarios",{nome,email:email.toLowerCase().trim(),senha,plano:"pro",assinatura_ativa:true});if(!u)return{erro:"Erro ao criar conta."};return{usuario:u};}
 function loginGoogle(){window.location.href=`${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`;}
 
-// ── CASA DOS DADOS ────────────────────────────────────────────
+// ── CASA DOS DADOS (via proxy Vercel) ────────────────────────
 const CNAES={arquitetura:["7111100"],engenharia:["7112000"],construtora:["4120400","4399103"],imobiliaria:["6821801","6821802"],industria:["2899199","2812200"],comercio:["4789099","4744001"],hospital:["8610101","8630501"],escola:["8513900","8520100"],condominio:["8112500","6810202"],supermercado:["4711301","4711302"]};
+
 async function buscarEmpresas(municipio,bairro,seg){
   try{
-    const body={codigo_atividade_principal:CNAES[seg]||["7111100"],situacao_cadastral:["ATIVA"],municipio:[municipio.toLowerCase()],...(bairro?{bairro:[bairro.toLowerCase()]}:{})};
-    const r=await fetch("https://api.casadosdados.com.br/v5/cnpj/pesquisa",{method:"POST",headers:{"api-key":CASA_KEY,"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const body={
+      codigo_atividade_principal:CNAES[seg]||["7111100"],
+      situacao_cadastral:["ATIVA"],
+      municipio:[municipio.toLowerCase()],
+      ...(bairro?{bairro:[bairro.toLowerCase()]}:{})
+    };
+    // Tenta via proxy Vercel primeiro (resolve CORS)
+    try{
+      const r=await fetch("/api/buscar",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if(r.ok)return await r.json();
+    }catch{}
+    // Fallback: direto (pode dar CORS em alguns navegadores)
+    const r=await fetch("https://api.casadosdados.com.br/v5/cnpj/pesquisa",{
+      method:"POST",
+      headers:{"api-key":CASA_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify(body)
+    });
     return await r.json();
-  }catch{return null;}
+  }catch(e){
+    console.error("Erro busca:",e);
+    return null;
+  }
 }
 
 // ── VOZ ───────────────────────────────────────────────────────
+function getVozFeminina(){
+  const vozes=window.speechSynthesis.getVoices();
+  return vozes.find(v=>v.lang.startsWith("pt")&&(
+    v.name.includes("Luciana")||v.name.includes("Vitoria")||
+    v.name.includes("Francisca")||v.name.includes("Google")||
+    v.name.toLowerCase().includes("female")
+  ))||vozes.find(v=>v.lang.startsWith("pt"))||null;
+}
+
 function falar(texto, onStart, onEnd){
   if(!window.speechSynthesis)return;
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(texto);
-  u.lang="pt-BR"; u.rate=1.0; u.pitch=1.2; u.volume=1;
-  const vozes = window.speechSynthesis.getVoices();
-  const fem = vozes.find(v=>v.lang.startsWith("pt")&&(v.name.includes("Luciana")||v.name.includes("Vitoria")||v.name.includes("Google")||v.name.toLowerCase().includes("female")));
-  if(fem) u.voice = fem;
-  u.onstart = ()=>onStart&&onStart();
-  u.onend   = ()=>onEnd&&onEnd();
-  window.speechSynthesis.speak(u);
+  const u=new SpeechSynthesisUtterance(texto);
+  u.lang="pt-BR"; u.rate=0.95; u.pitch=1.15; u.volume=1;
+
+  function executar(){
+    const voz=getVozFeminina();
+    if(voz) u.voice=voz;
+    u.onstart=()=>onStart&&onStart();
+    u.onend=()=>onEnd&&onEnd();
+    u.onerror=()=>onEnd&&onEnd();
+    window.speechSynthesis.speak(u);
+  }
+
+  const vozes=window.speechSynthesis.getVoices();
+  if(vozes.length>0){executar();}
+  else{window.speechSynthesis.onvoiceschanged=()=>{window.speechSynthesis.onvoiceschanged=null;executar();};}
 }
 
 function ouvirVoz(onResult, onError){
@@ -430,14 +469,26 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
   const [hist,    setHist]      = useState([]);
   const [texto,   setTexto]     = useState("");
   const recRef = useRef(null);
+  const histRef = useRef(null);
   const nome = usuario?.nome?.split(" ")[0]||"Eletricista";
 
   useEffect(()=>{
-    const intro = `Olá ${nome}! Eu sou ${nomeAssistente}, sua assistente inteligente do Prótons Prospect! Pode me perguntar qualquer coisa sobre o app. Estou ouvindo!`;
+    // Aguarda vozes carregarem antes de falar
+    const intro=`Olá ${nome}! Eu sou ${nomeAssistente}, sua assistente inteligente do Prótons Prospect! Pode me perguntar qualquer coisa sobre o app. Estou ouvindo!`;
     setMsg(intro);
     setHist([{de:"ia",txt:intro}]);
-    falar(intro, ()=>setFalando(true), ()=>setFalando(false));
+    const timer=setTimeout(()=>{
+      falar(intro,()=>setFalando(true),()=>setFalando(false));
+    },500);
+    return()=>clearTimeout(timer);
   },[]);
+
+  // Auto-scroll para última mensagem
+  useEffect(()=>{
+    if(histRef.current){
+      histRef.current.scrollTop=histRef.current.scrollHeight;
+    }
+  },[hist]);
 
   function enviarTexto(){
     if(!texto.trim())return;
@@ -489,7 +540,7 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
         </div>
 
         {/* Histórico */}
-        <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,marginBottom:14,maxHeight:280}}>
+        <div ref={histRef} style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,marginBottom:14,maxHeight:280}}>
           {hist.map((h,i)=>(
             <div key={i} style={{display:"flex",justifyContent:h.de==="user"?"flex-end":"flex-start"}}>
               <div style={{maxWidth:"85%",background:h.de==="user"?`linear-gradient(135deg,${GOLD},${GOLD2})`:"#f5f5f5",color:h.de==="user"?"#1a1a1a":"#333",borderRadius:h.de==="user"?"18px 18px 4px 18px":"18px 18px 18px 4px",padding:"10px 14px",fontSize:14,fontWeight:600,lineHeight:1.5}}>
@@ -504,84 +555,6 @@ function AssistenteModal({nomeAssistente, usuario, onClose}){
           <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>e.key==="Enter"&&enviarTexto()} placeholder="Digite ou use o microfone..." style={{flex:1,background:"#f8f8f8",border:`1.5px solid ${ouvindo?GOLD:"#e5e5e5"}`,color:"#333",borderRadius:12,padding:"12px 14px",fontSize:14,outline:"none"}}/>
           <button onClick={ativarMic} style={{width:46,height:46,borderRadius:12,border:"none",background:ouvindo?`linear-gradient(135deg,${GOLD},${GOLD2})`:"#f5f5f5",color:ouvindo?"#1a1a1a":"#888",fontSize:20,flexShrink:0,animation:ouvindo?"mic 1s infinite":"none"}}>🎙️</button>
           <button onClick={enviarTexto} style={{width:46,height:46,borderRadius:12,border:"none",background:`linear-gradient(135deg,${GOLD},${GOLD2})`,color:"#1a1a1a",fontSize:18,flexShrink:0}}>➤</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── CALCULADORA ELÉTRICA ──────────────────────────────────────
-function CalculadoraEletrica(){
-  const [pot,  setPot]  = useState("");
-  const [tens, setTens] = useState("220");
-  const [fp,   setFp]   = useState("0.92");
-  const [dist, setDist] = useState("10");
-  const [res,  setRes]  = useState(null);
-
-  function calcular(){
-    const r = calcularEletrica(pot,tens,fp,dist);
-    setRes(r);
-    if(!r) alert("Preencha a potência corretamente.");
-  }
-
-  return(
-    <div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div className="card" style={{padding:16}}>
-        <div style={{fontSize:15,fontWeight:800,marginBottom:12,color:DARK}}>⚡ Dados do Circuito</div>
-        <div className="g2" style={{marginBottom:10}}>
-          <div><label className="lbl">Potência (W)</label><input className="inp" type="number" value={pot} onChange={e=>setPot(e.target.value)} placeholder="Ex: 1500"/></div>
-          <div><label className="lbl">Tensão (V)</label><select className="sel" value={tens} onChange={e=>setTens(e.target.value)}><option value="127">127V</option><option value="220">220V</option><option value="380">380V</option></select></div>
-          <div><label className="lbl">Fator de Potência</label><input className="inp" type="number" step="0.01" value={fp} onChange={e=>setFp(e.target.value)} placeholder="0.92"/></div>
-          <div><label className="lbl">Distância (m)</label><input className="inp" type="number" value={dist} onChange={e=>setDist(e.target.value)} placeholder="10"/></div>
-        </div>
-        <button className="btn btn-gold" onClick={calcular} style={{width:"100%",fontSize:15,padding:"14px"}}>⚡ Calcular</button>
-      </div>
-
-      {res&&<div className="card" style={{padding:16}}>
-        <div style={{fontSize:15,fontWeight:800,marginBottom:12,color:DARK}}>📊 Resultado</div>
-        {[
-          {l:"Corrente elétrica",v:`${res.corrente} A`,c:"#6366f1",ico:"⚡"},
-          {l:"Cabo recomendado",v:`${res.cabo} mm²`,c:GOLD2,ico:"🔌"},
-          {l:"Disjuntor ideal",v:`${res.disjuntor} A`,c:"#10b981",ico:"🔒"},
-          {l:"Queda de tensão",v:`${res.queda}%`,c:Number(res.queda)>4?"#ef4444":"#10b981",ico:"📉"},
-        ].map(r=>(
-          <div key={r.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px",background:"#f8f8f8",borderRadius:12,marginBottom:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:20}}>{r.ico}</span>
-              <span style={{fontSize:14,fontWeight:700,color:"#555"}}>{r.l}</span>
-            </div>
-            <span style={{fontSize:17,fontWeight:900,color:r.c}}>{r.v}</span>
-          </div>
-        ))}
-        <div style={{background:"#fef9c3",borderRadius:12,padding:12,marginTop:4}}>
-          <div style={{fontSize:13,fontWeight:700,color:GOLD2,marginBottom:4}}>⚠️ Observações:</div>
-          <div style={{fontSize:12,color:"#666",lineHeight:1.6}}>
-            {Number(res.queda)>4?"❌ Queda de tensão acima de 4%! Aumente a seção do cabo.":"✅ Queda de tensão dentro do limite (NBR 5410)."}<br/>
-            Cabo {res.cabo}mm² suporta até {res.cabo===1.5?15:res.cabo===2.5?21:res.cabo===4?27:res.cabo===6?35:res.cabo===10?48:65}A<br/>
-            Use eletroduto de {res.cabo<=2.5?"3/4\"":res.cabo<=6?"1\"":"1 1/4\""} para este cabo.
-          </div>
-        </div>
-      </div>}
-
-      <div className="card" style={{padding:16}}>
-        <div style={{fontSize:15,fontWeight:800,marginBottom:10,color:DARK}}>📚 Referência NBR 5410</div>
-        {[
-          ["Tomada residencial","127/220V","10A","1.5mm²","10A"],
-          ["Tomada uso geral","127/220V","20A","2.5mm²","20A"],
-          ["Chuveiro 5500W","220V","25A","4mm²","25A"],
-          ["Ar-cond. 12000 BTU","220V","15A","2.5mm²","16A"],
-          ["Iluminação sala","127/220V","6A","1.5mm²","10A"],
-        ].map(([nome,tensao,corr,cabo,disj],i)=>(
-          <div key={i} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:4,padding:"8px 0",borderBottom:"1px solid #f5f5f5",fontSize:11,fontWeight:600,color:"#555",alignItems:"center"}}>
-            <span style={{fontWeight:700,color:"#333"}}>{nome}</span>
-            <span style={{textAlign:"center"}}>{tensao}</span>
-            <span style={{textAlign:"center",color:"#6366f1"}}>{corr}</span>
-            <span style={{textAlign:"center",color:GOLD2}}>{cabo}</span>
-            <span style={{textAlign:"center",color:"#10b981"}}>{disj}</span>
-          </div>
-        ))}
-        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:4,padding:"6px 0",fontSize:10,color:"#aaa",fontWeight:800}}>
-          <span>CIRCUITO</span><span style={{textAlign:"center"}}>TENSÃO</span><span style={{textAlign:"center"}}>CORRENTE</span><span style={{textAlign:"center"}}>CABO</span><span style={{textAlign:"center"}}>DISJ.</span>
         </div>
       </div>
     </div>
@@ -1015,7 +988,7 @@ export default function App(){
         {tab==="estoque"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>📦 Estoque</div>
-            <button className="btn btn-gold" onClick={()=>{setFormObra({id:uid(),nome:"",qty:0,un:"un",preco:0});setModalComodo(true);}} style={{fontSize:12,padding:"9px 12px"}}>+ Item</button>
+            <button className="btn btn-gold" onClick={()=>{setFormEst({id:uid(),nome:"",qty:0,un:"un",preco:0});setModalEst(true);}} style={{fontSize:12,padding:"9px 12px"}}>+ Item</button>
           </div>
           {estoque.map(e=>(
             <div key={e.id} className="card" style={{padding:14,display:"flex",alignItems:"center",gap:12}}>
@@ -1090,7 +1063,7 @@ export default function App(){
 
         {/* ── VISITAS TÉCNICAS ── */}
         {tab==="visita"&&<>
-          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={adicionarFoto}/>
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple style={{display:"none"}} onChange={adicionarFoto}/>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>📷 Visitas Técnicas</div>
             <button className="btn btn-gold" onClick={()=>{setFormVisita({id:uid(),nome:"",data:hoje(),obs:""});setModalVisita(true);}} style={{fontSize:12,padding:"9px 12px"}}>+ Nova Visita</button>
