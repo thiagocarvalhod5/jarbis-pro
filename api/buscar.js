@@ -1,9 +1,6 @@
-// api/buscar.js — Casa dos Dados com Polling de Arquivo
-// Chave via variável de ambiente (seguro)
+// api/buscar.js — Casa dos Dados
 const API_KEY = process.env.CASA_DADOS_KEY || "64b4a4ee0c6a8f0c68c1fd3b8a802377edaa123d2de0dba7afb356bd8d165b55c496506456420da93d6483203b2713d322e658fca01e62ff3cd86b6476cbf043";
 const BASE    = "https://api.casadosdados.com.br";
-
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -14,19 +11,17 @@ export default async function handler(req, res) {
 
   try {
     const { municipio, codigo_atividade_principal, bairro } = req.body;
-
     const H = { "api-key": API_KEY, "Content-Type": "application/json" };
 
-    // ── PASSO 1: Pesquisa direta v5 ──────────────────────────
+    // ── TENTATIVA 1: v5 com celular ──────────────────────────
     const pesqBody = {
       codigo_atividade_principal: codigo_atividade_principal || [],
       situacao_cadastral: ["ATIVA"],
       municipio: municipio || [],
       ...(bairro && bairro.length ? { bairro } : {}),
       mais_filtros: {
-        com_telefone:       true,
-        somente_matriz:     true,
-        excluir_email_contab: true,
+        somente_celular: true,
+        somente_matriz:  true,
       },
       limite: 20,
       pagina: 1,
@@ -38,83 +33,44 @@ export default async function handler(req, res) {
     });
     const pesqData = await pesqResp.json();
 
-    // Se v5 retornou dados direto — usa eles
     if (pesqData?.cnpjs?.length > 0) {
       return res.status(200).json({
         sucesso: true,
         cnpjs: pesqData.cnpjs,
         total: pesqData.total || pesqData.cnpjs.length,
-        fonte: "v5-direto"
+        fonte: "v5-celular"
       });
     }
 
-    // ── PASSO 2: Gera arquivo via v5 para obter UUID ─────────
-    const gerarBody = {
-      total_linhas: 50,
-      nome: "protons-prospect",
-      tipo: "json",
-      pesquisa: {
-        codigo_atividade_principal: codigo_atividade_principal || [],
-        situacao_cadastral: ["ATIVA"],
-        municipio: municipio || [],
-        ...(bairro && bairro.length ? { bairro } : {}),
-        mais_filtros: {
-          com_telefone:   true,
-          somente_matriz: true,
-        },
+    // ── TENTATIVA 2: v5 sem filtro de telefone ───────────────
+    const pesqBody2 = {
+      codigo_atividade_principal: codigo_atividade_principal || [],
+      situacao_cadastral: ["ATIVA"],
+      municipio: municipio || [],
+      ...(bairro && bairro.length ? { bairro } : {}),
+      mais_filtros: {
+        somente_matriz: true,
       },
+      limite: 20,
+      pagina: 1,
     };
 
-    const gerarResp = await fetch(`${BASE}/v5/cnpj/pesquisa/arquivo`, {
+    const pesqResp2 = await fetch(`${BASE}/v5/cnpj/pesquisa?tipo_resultado=completo`, {
       method: "POST", headers: H,
-      body: JSON.stringify(gerarBody),
+      body: JSON.stringify(pesqBody2),
     });
-    const gerarData = await gerarResp.json();
-    const uuid = gerarData?.arquivo_uuid || gerarData?.uuid || null;
+    const pesqData2 = await pesqResp2.json();
 
-    // ── PASSO 3: Polling — aguarda arquivo ficar pronto ──────
-    if (uuid) {
-      let link = null;
-      let tentativas = 0;
-      const maxTentativas = 12; // até 60 segundos
-
-      while (!link && tentativas < maxTentativas) {
-        await sleep(5000); // aguarda 5 segundos
-        tentativas++;
-
-        const checkResp = await fetch(`${BASE}/v4/public/cnpj/pesquisa/arquivo/${uuid}`, {
-          headers: H,
-        });
-        const checkData = await checkResp.json();
-
-        if (checkData?.link) {
-          link = checkData.link;
-        }
-      }
-
-      if (link) {
-        // Baixa e processa o arquivo JSON
-        const arquivoResp = await fetch(link);
-        const arquivoData = await arquivoResp.json().catch(async()=>{
-          // Tenta como texto CSV se não for JSON
-          const texto = await arquivoResp.text();
-          return { raw: texto };
-        });
-
-        const cnpjs = Array.isArray(arquivoData)
-          ? arquivoData
-          : arquivoData?.data || arquivoData?.cnpjs || [];
-
-        return res.status(200).json({
-          sucesso: true,
-          cnpjs,
-          total: cnpjs.length,
-          fonte: "v5-arquivo"
-        });
-      }
+    if (pesqData2?.cnpjs?.length > 0) {
+      return res.status(200).json({
+        sucesso: true,
+        cnpjs: pesqData2.cnpjs,
+        total: pesqData2.total || pesqData2.cnpjs.length,
+        fonte: "v5-sem-filtro"
+      });
     }
 
-    // ── FALLBACK: v4 pesquisa direta ─────────────────────────
+    // ── TENTATIVA 3: v4 com celular ──────────────────────────
     const v4Body = {
       query: {
         termo: [],
@@ -132,12 +88,12 @@ export default async function handler(req, res) {
       },
       extras: {
         somente_mei: false,
-        excluir_mei: true,
+        excluir_mei: false,
         com_email: false,
         incluir_atividade_secundaria: false,
         com_contato_telefonico: true,
         somente_fixo: false,
-        somente_celular: false,
+        somente_celular: true,
         somente_matriz: true,
         somente_filial: false,
       },
@@ -155,24 +111,60 @@ export default async function handler(req, res) {
         sucesso: true,
         cnpjs: v4Data.data,
         total: v4Data.count || v4Data.data.length,
-        fonte: "v4"
+        fonte: "v4-celular"
       });
     }
 
-    // Sem resultados
+    // ── TENTATIVA 4: v4 sem filtro de telefone ───────────────
+    const v4Body2 = {
+      query: {
+        termo: [],
+        atividade_principal: (codigo_atividade_principal||[]).map(c=>({codigo:c})),
+        natureza_juridica: [],
+        uf: [],
+        municipio: (municipio||[]).map(m=>({descricao:m})),
+        bairro: (bairro||[]).map(b=>({nome:b})),
+        situacao_cadastral: "ATIVA",
+        cep: [], ddd: [],
+      },
+      range_query: {
+        data_abertura: { lte:null, gte:null },
+        capital_social: { lte:null, gte:null },
+      },
+      extras: {
+        somente_mei: false,
+        excluir_mei: false,
+        com_email: false,
+        incluir_atividade_secundaria: false,
+        com_contato_telefonico: false,
+        somente_fixo: false,
+        somente_celular: false,
+        somente_matriz: true,
+        somente_filial: false,
+      },
+      page: 1,
+    };
+
+    const v4Resp2 = await fetch(`${BASE}/v2/public/cnpj/search`, {
+      method: "POST", headers: H,
+      body: JSON.stringify(v4Body2),
+    });
+    const v4Data2 = await v4Resp2.json();
+
+    if (v4Data2?.data?.length > 0) {
+      return res.status(200).json({
+        sucesso: true,
+        cnpjs: v4Data2.data,
+        total: v4Data2.count || v4Data2.data.length,
+        fonte: "v4-sem-filtro"
+      });
+    }
+
     return res.status(200).json({
       sucesso: true,
       cnpjs: [],
       total: 0,
       fonte: "sem-resultado",
-      debug: {
-        v5_status: pesqResp.status,
-        v5_total: pesqData?.total,
-        v5_erro: pesqData?.erro || pesqData?.message,
-        v4_status: v4Resp.status,
-        v4_count: v4Data?.count,
-        uuid: uuid || "não gerado",
-      }
     });
 
   } catch (e) {
