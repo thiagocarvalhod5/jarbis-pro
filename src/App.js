@@ -107,16 +107,212 @@ const STATUS_OS={orcamento:{l:"Orçamento",c:"#f59e0b"},aprovado:{l:"Aprovado",c
 const PGTOS=["À vista","PIX","Cartão","50% entrada + 50% conclusão","30 dias","Parcelado 3x","Outro"];
 const CATS_FIN=["Serviço","Material","Ferramenta","Combustível","Alimentação","Impostos","Salário","Obra","Outros"];
 
-// ── CALCULADORA ELÉTRICA ──────────────────────────────────────
-function calcularEletrica(pot, tensao, fp, dist){
-  const P=Number(pot), V=Number(tensao), FP=Number(fp)||0.92, D=Number(dist)||10;
-  if(!P||!V)return null;
-  const I = P/(V*FP);
-  const quedaPorc = (2*I*D*0.0175)/(V*16)*100;
-  const cabos=[{s:1.5,cap:15},{s:2.5,cap:21},{s:4,cap:27},{s:6,cap:35},{s:10,cap:48},{s:16,cap:65},{s:25,cap:85}];
-  const caboIdeal = cabos.find(c=>c.cap>=I*1.25)||cabos[cabos.length-1];
-  const disj = I<=10?10:I<=16?16:I<=20?20:I<=25?25:I<=32?32:I<=40?40:I<=50?50:63;
-  return{corrente:I.toFixed(2),queda:quedaPorc.toFixed(2),cabo:caboIdeal.s,disjuntor:disj,potencia:P,tensao:V};
+// ── CALCULADORA ELÉTRICA COMPLETA ────────────────────────────
+const CABOS=[{s:1.5,cap:15},{s:2.5,cap:21},{s:4,cap:27},{s:6,cap:35},{s:10,cap:48},{s:16,cap:65},{s:25,cap:85},{s:35,cap:104},{s:50,cap:125}];
+function caboIdeal(I){return CABOS.find(c=>c.cap>=I*1.25)||CABOS[CABOS.length-1];}
+function disjIdeal(I){const d=[6,10,16,20,25,32,40,50,63,70,80,100];return d.find(x=>x>=I*1.25)||100;}
+function quedaTensao(I,D,S,V){return((2*I*D*0.0175)/S/V*100).toFixed(2);}
+
+function CalculadoraEletrica(){
+  const [tipo,setTipo]=useState("residencial");
+  const [form,setForm]=useState({pot:"",tensao:"220",fp:"0.92",dist:"10",fases:"1",rendimento:"0.90",btu:"",cargaTotal:"",fd:"0.7"});
+  const [res,setRes]=useState(null);
+  const F=form;
+
+  function calcular(){
+    let I,cabo,disj,queda,obs="";
+    const V=Number(F.tensao),D=Number(F.dist)||10,FP=Number(F.fp)||0.92;
+
+    if(tipo==="residencial"||tipo==="iluminacao"||tipo==="tomada"){
+      const P=Number(F.pot);if(!P){alert("Informe a potência.");return;}
+      I=P/(V*FP);
+      cabo=caboIdeal(I);queda=quedaTensao(I,D,cabo.s,V);disj=disjIdeal(I);
+      obs=Number(queda)>4?"⚠️ Queda acima de 4%! Aumente a seção do cabo.":"✅ Queda dentro do limite NBR 5410 (máx 4%).";
+    }
+    else if(tipo==="motor"){
+      const P=Number(F.pot),rend=Number(F.rendimento)||0.90,fases=Number(F.fases)||3;
+      if(!P){alert("Informe a potência.");return;}
+      if(fases===3) I=(P*1000)/(Math.sqrt(3)*V*FP*rend);
+      else I=(P*1000)/(V*FP*rend);
+      cabo=caboIdeal(I*1.25);queda=quedaTensao(I,D,cabo.s,V);disj=disjIdeal(I*1.25);
+      obs=`Motor ${fases===3?"Trifásico":"Monofásico"} — corrente de partida ≈ ${(I*7).toFixed(1)}A. Use disjuntor com curva D ou chave de partida suave.`;
+    }
+    else if(tipo==="arcondicionado"){
+      const btu=Number(F.btu);if(!btu){alert("Informe o BTU.");return;}
+      const P=btu/3.517;
+      I=P*1000/(V*FP);
+      cabo=caboIdeal(I);queda=quedaTensao(I,D,cabo.s,V);disj=disjIdeal(I);
+      const area=btu<=9000?"até 10m²":btu<=12000?"até 15m²":btu<=18000?"até 25m²":btu<=24000?"até 35m²":"acima de 35m²";
+      obs=`Potência equivalente: ${P.toFixed(2)}kW. Área recomendada: ${area}. Requer circuito exclusivo.`;
+    }
+    else if(tipo==="carga"){
+      const ct=Number(F.cargaTotal),fd=Number(F.fd)||0.7;if(!ct){alert("Informe a carga total.");return;}
+      const P=ct*fd;
+      I=P/(V*FP);
+      cabo=caboIdeal(I);queda=quedaTensao(I,D,cabo.s,V);disj=disjIdeal(I);
+      obs=`Carga instalada: ${ct}W. Fator de demanda: ${fd*100}%. Carga de demanda: ${P.toFixed(0)}W.`;
+    }
+
+    setRes({corrente:I.toFixed(2),cabo:cabo.s,disjuntor:disj,queda,obs,capCabo:cabo.cap});
+  }
+
+  const TIPOS=[{id:"residencial",l:"🏠 Residencial"},{id:"motor",l:"⚙️ Motor Elétrico"},{id:"arcondicionado",l:"❄️ Ar-Condicionado"},{id:"iluminacao",l:"💡 Iluminação"},{id:"tomada",l:"🔌 Tomadas"},{id:"carga",l:"📊 Carga Total"}];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {/* Tipo de cálculo */}
+      <div className="card" style={{padding:14}}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:10,color:DARK}}>Tipo de Cálculo</div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          {TIPOS.map(t=><button key={t.id} onClick={()=>{setTipo(t.id);setRes(null);}} style={{padding:"8px 12px",borderRadius:10,border:`2px solid ${tipo===t.id?GOLD:"#e5e5e5"}`,background:tipo===t.id?"#fef9c3":"#f8f8f8",color:tipo===t.id?GOLD2:"#555",fontSize:12,fontWeight:800,cursor:"pointer"}}>{t.l}</button>)}
+        </div>
+      </div>
+
+      {/* Formulário */}
+      <div className="card" style={{padding:14}}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:12,color:DARK}}>⚡ Dados</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {/* Potência */}
+          {tipo!=="arcondicionado"&&tipo!=="carga"&&<div><label className="lbl">{tipo==="motor"?"Potência do motor (cv/kW)":"Potência (W)"}</label><input className="inp" type="number" value={form.pot} onChange={e=>setForm(p=>({...p,pot:e.target.value}))} placeholder={tipo==="motor"?"Ex: 5 (cv) ou 3.7 (kW)":"Ex: 1500"}/></div>}
+          {/* BTU */}
+          {tipo==="arcondicionado"&&<div><label className="lbl">Capacidade (BTU)</label><select className="sel" value={form.btu} onChange={e=>setForm(p=>({...p,btu:e.target.value}))}><option value="">Selecione...</option>{[7000,9000,12000,18000,24000,30000,36000,48000,60000].map(b=><option key={b} value={b}>{b.toLocaleString()} BTU</option>)}</select></div>}
+          {/* Carga Total */}
+          {tipo==="carga"&&<>
+            <div><label className="lbl">Carga total instalada (W)</label><input className="inp" type="number" value={form.cargaTotal} onChange={e=>setForm(p=>({...p,cargaTotal:e.target.value}))} placeholder="Soma de todas as cargas"/></div>
+            <div><label className="lbl">Fator de demanda</label><select className="sel" value={form.fd} onChange={e=>setForm(p=>({...p,fd:e.target.value}))}><option value="0.5">50% — Grande residência</option><option value="0.6">60% — Residência média</option><option value="0.7">70% — Residência pequena</option><option value="0.8">80% — Comércio</option><option value="1.0">100% — Industrial</option></select></div>
+          </>}
+          {/* Fases motor */}
+          {tipo==="motor"&&<>
+            <div><label className="lbl">Tipo de motor</label><select className="sel" value={form.fases} onChange={e=>setForm(p=>({...p,fases:e.target.value}))}><option value="1">Monofásico</option><option value="3">Trifásico</option></select></div>
+            <div><label className="lbl">Rendimento do motor (%)</label><select className="sel" value={form.rendimento} onChange={e=>setForm(p=>({...p,rendimento:e.target.value}))}><option value="0.75">75%</option><option value="0.80">80%</option><option value="0.85">85%</option><option value="0.90">90% (padrão)</option><option value="0.95">95%</option></select></div>
+          </>}
+          <div className="g2">
+            <div><label className="lbl">Tensão (V)</label><select className="sel" value={form.tensao} onChange={e=>setForm(p=>({...p,tensao:e.target.value}))}><option value="127">127V</option><option value="220">220V</option><option value="380">380V (trifásico)</option></select></div>
+            <div><label className="lbl">Distância (m)</label><input className="inp" type="number" value={form.dist} onChange={e=>setForm(p=>({...p,dist:e.target.value}))} placeholder="10"/></div>
+            <div><label className="lbl">Fator de potência</label><input className="inp" type="number" step="0.01" value={form.fp} onChange={e=>setForm(p=>({...p,fp:e.target.value}))} placeholder="0.92"/></div>
+          </div>
+          <button className="btn btn-gold" onClick={calcular} style={{width:"100%",fontSize:15,padding:"14px"}}>⚡ Calcular</button>
+        </div>
+      </div>
+
+      {/* Resultado */}
+      {res&&<div className="card" style={{padding:14}}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:12,color:DARK}}>📊 Resultado</div>
+        {[
+          {l:"Corrente elétrica",v:`${res.corrente} A`,c:"#6366f1",ico:"⚡"},
+          {l:"Cabo recomendado",v:`${res.cabo} mm²`,c:GOLD2,ico:"🔌"},
+          {l:"Capacidade do cabo",v:`${res.capCabo} A`,c:"#888",ico:"📏"},
+          {l:"Disjuntor ideal",v:`${res.disjuntor} A`,c:"#10b981",ico:"🔒"},
+          {l:"Queda de tensão",v:`${res.queda}%`,c:Number(res.queda)>4?"#ef4444":"#10b981",ico:"📉"},
+        ].map(r=>(
+          <div key={r.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px",background:"#f8f8f8",borderRadius:11,marginBottom:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:18}}>{r.ico}</span><span style={{fontSize:13,fontWeight:700,color:"#555"}}>{r.l}</span></div>
+            <span style={{fontSize:16,fontWeight:900,color:r.c}}>{r.v}</span>
+          </div>
+        ))}
+        <div style={{background:"#fef9c3",borderRadius:11,padding:12,marginTop:4}}>
+          <div style={{fontSize:12,fontWeight:700,color:GOLD2,marginBottom:4}}>📋 Observações:</div>
+          <div style={{fontSize:12,color:"#666",lineHeight:1.7}}>{res.obs}</div>
+        </div>
+      </div>}
+
+      {/* Tabela NBR 5410 */}
+      <div className="card" style={{padding:14}}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:10,color:DARK}}>📚 Referência NBR 5410</div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <thead><tr style={{background:"#1a1a1a",color:GOLD}}>{["Circuito","Tensão","Corrente","Cabo","Disj."].map(h=><th key={h} style={{padding:"7px 6px",textAlign:"left",fontWeight:800,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+            <tbody>
+              {[
+                ["Tomada resid.","127/220V","10A","1.5mm²","10A"],
+                ["Tomada uso geral","220V","20A","2.5mm²","20A"],
+                ["Chuveiro 5500W","220V","25A","4mm²","25A"],
+                ["AR 9.000 BTU","220V","8A","1.5mm²","10A"],
+                ["AR 12.000 BTU","220V","10A","1.5mm²","16A"],
+                ["AR 18.000 BTU","220V","15A","2.5mm²","20A"],
+                ["AR 24.000 BTU","220V","18A","2.5mm²","20A"],
+                ["Motor 1cv mono","220V","7A","1.5mm²","10A"],
+                ["Motor 5cv trifás","380V","10A","1.5mm²","16A"],
+                ["Iluminação sala","127/220V","6A","1.5mm²","10A"],
+                ["Quadro principal","220V","60A","16mm²","63A"],
+              ].map(([n,t,c,cb,d],i)=>(
+                <tr key={i} style={{background:i%2===0?"#f8f8f8":"#fff"}}>
+                  <td style={{padding:"7px 6px",fontWeight:700,color:"#333"}}>{n}</td>
+                  <td style={{padding:"7px 6px",color:"#555"}}>{t}</td>
+                  <td style={{padding:"7px 6px",color:"#6366f1",fontWeight:700}}>{c}</td>
+                  <td style={{padding:"7px 6px",color:GOLD2,fontWeight:700}}>{cb}</td>
+                  <td style={{padding:"7px 6px",color:"#10b981",fontWeight:700}}>{d}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── PDF REAL ──────────────────────────────────────────────────
+function gerarDocumento(os,emp,tipoDoc){
+  const itens=(os.itens||[]).map(s=>`<tr><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0">${s.n}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:center">${s.q}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right">R$${Number(s.v).toFixed(2).replace(".",",")}</td><td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:700">R$${(s.q*s.v).toFixed(2).replace(".",",")}</td></tr>`).join("");
+  const total=(os.itens||[]).reduce((a,b)=>a+b.q*b.v,0)-(Number(os.desconto)||0);
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${tipoDoc} ${os.numero||"001"}</title><style>
+  body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:28px;max-width:720px;margin:0 auto;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a1a1a;padding-bottom:16px;margin-bottom:20px;}
+  .empresa{font-size:18px;font-weight:900;color:#1a1a1a;margin-bottom:4px;}
+  .sub{font-size:11px;color:#666;margin-top:2px;}
+  .titulo{background:#1a1a1a;color:#F5C518;padding:10px 14px;font-size:16px;font-weight:900;border-radius:6px;margin-bottom:16px;}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px;}
+  th{background:#f5f5f5;padding:9px 6px;text-align:left;font-size:12px;color:#555;font-weight:700;border-bottom:2px solid #e5e5e5;}
+  .info{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;}
+  .info-box{background:#f8f8f8;border-radius:8px;padding:12px;}
+  .info-label{font-size:10px;color:#888;font-weight:700;text-transform:uppercase;margin-bottom:4px;}
+  .info-val{font-size:13px;font-weight:700;color:#333;}
+  .total-box{display:flex;justify-content:flex-end;margin-top:8px;}
+  .total-inner{min-width:220px;border-top:2px solid #1a1a1a;padding-top:10px;}
+  .total-row{display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;}
+  .total-final{display:flex;justify-content:space-between;font-size:19px;font-weight:900;}
+  .assinatura{margin-top:60px;text-align:center;border-top:1px solid #ccc;padding-top:10px;font-size:12px;color:#555;}
+  @media print{body{padding:0;}}
+  </style></head><body>
+  <div class="header">
+    <div>
+      <div class="empresa">⚡ ${emp.nome||"Prótons Serviços Elétricos"}</div>
+      <div class="sub">${emp.cnpj?"CNPJ: "+emp.cnpj:""}${emp.crea?" · CREA: "+emp.crea:""}</div>
+      <div class="sub">${emp.tel||""}${emp.email?" · "+emp.email:""}</div>
+      <div class="sub">${emp.endereco||""}</div>
+    </div>
+    <div style="text-align:right;font-size:12px;color:#888">
+      <div>Nº ${os.numero||"001"}</div>
+      <div>${os.data||hoje()}</div>
+    </div>
+  </div>
+  <div class="titulo">${tipoDoc}</div>
+  <div class="info">
+    <div class="info-box"><div class="info-label">Cliente</div><div class="info-val">${os.clienteNome||"—"}</div><div class="sub">${os.clienteTel||""}</div></div>
+    <div class="info-box"><div class="info-label">Local / Endereço</div><div class="info-val">${os.local||"—"}</div></div>
+    <div class="info-box"><div class="info-label">Forma de Pagamento</div><div class="info-val">${os.pagamento||"—"}</div></div>
+    <div class="info-box"><div class="info-label">Vencimento</div><div class="info-val">${os.vencimento||"—"}</div></div>
+  </div>
+  ${os.descricao?`<div style="background:#fef9c3;border-left:4px solid #F5C518;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:13px">${os.descricao}</div>`:""}
+  <table>
+    <thead><tr><th>Descrição</th><th style="text-align:center">Qtd</th><th style="text-align:right">Unitário</th><th style="text-align:right">Total</th></tr></thead>
+    <tbody>${itens}</tbody>
+  </table>
+  <div class="total-box"><div class="total-inner">
+    ${Number(os.desconto)>0?`<div class="total-row"><span>Desconto</span><span style="color:#ef4444">- R$${Number(os.desconto).toFixed(2).replace(".",",")}</span></div>`:""}
+    ${Number(os.sinal)>0?`<div class="total-row"><span>Sinal/Entrada</span><span>R$${Number(os.sinal).toFixed(2).replace(".",",")}</span></div>`:""}
+    <div class="total-final"><span>TOTAL</span><span style="color:#C9A227">R$${total.toFixed(2).replace(".",",")}</span></div>
+  </div></div>
+  ${os.obs?`<div style="margin-top:16px;background:#f8f8f8;border-radius:8px;padding:12px"><div style="font-size:11px;color:#888;font-weight:700;margin-bottom:4px">OBSERVAÇÕES</div><div style="font-size:13px;color:#555">${os.obs}</div></div>`:""}
+  <div class="assinatura">${emp.nome||"Prótons Serviços Elétricos"}<br>${emp.crea?"CREA: "+emp.crea:""}</div>
+  </body></html>`;
+  try{
+    const w=window.open("","_blank");
+    if(!w){alert("Habilite pop-ups para visualizar o documento.");return;}
+    w.document.write(html);w.document.close();
+    setTimeout(()=>{w.focus();},300);
+  }catch(e){alert("Erro: "+e.message);}
 }
 
 // ── CSS ───────────────────────────────────────────────────────
@@ -446,7 +642,8 @@ export default function App(){
   const [formComodo,   setFormComodo]   = useState({});
   const [modalVisita,  setModalVisita]  = useState(false);
   const [formVisita,   setFormVisita]   = useState({});
-  const [modalCalc,    setModalCalc]    = useState(false);
+  const [modalPDF,    setModalPDF]    = useState(false);
+  const [osPDF,       setOsPDF]       = useState(null);
   const [fSN,setFSN]=useState(""); const [fSP,setFSP]=useState("");
   const [pCidade,      setPCidade]      = useState("");
   const [pBairro,      setPBairro]      = useState("");
@@ -543,14 +740,18 @@ export default function App(){
 
   // Fotos visita
   function adicionarFoto(e){
-    const file=e.target.files[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      if(!visitaAtiva){showWarn("Selecione uma visita primeiro.");return;}
-      setVisitas(p=>p.map(v=>v.id===visitaAtiva?{...v,fotos:[...(v.fotos||[]),{id:uid(),src:ev.target.result,data:hoje()}]}:v));
-      showOk("Foto adicionada!");
-    };
-    reader.readAsDataURL(file);
+    const files=Array.from(e.target.files);
+    if(!files.length)return;
+    if(!visitaAtiva){showWarn("Selecione uma visita primeiro.");return;}
+    files.forEach(file=>{
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        setVisitas(p=>p.map(v=>v.id===visitaAtiva?{...v,fotos:[...(v.fotos||[]),{id:uid(),src:ev.target.result,data:hoje(),nome:file.name}]}:v));
+      };
+      reader.readAsDataURL(file);
+    });
+    showOk(files.length>1?files.length+" fotos adicionadas!":"Foto adicionada!");
+    e.target.value="";
   }
 
   const MODULOS=[
@@ -674,7 +875,7 @@ export default function App(){
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderTop:"1px solid #f5f5f5",paddingTop:10}}>
                 <div style={{fontSize:18,fontWeight:900,color:"#10b981"}}>{fmt(o.total)}</div>
                 <div style={{display:"flex",gap:7}}>
-                  <button className="btn btn-ghost" onClick={()=>showOk("PDF gerado!")} style={{fontSize:11,padding:"7px 10px"}}>🖨️ PDF</button>
+                  <button className="btn btn-ghost" onClick={()=>{setOsPDF(o);setModalPDF(true);}} style={{fontSize:11,padding:"7px 10px"}}>🖨️ PDF</button>
                   <button className="btn btn-gold" onClick={()=>editOS(o)} style={{fontSize:11,padding:"7px 10px"}}>✏️ Editar</button>
                   <button className="btn btn-r" onClick={()=>{setOrdens(p=>p.filter(x=>x.id!==o.id));showWarn("Removida.");}} style={{fontSize:11,padding:"7px 10px"}}>🗑️</button>
                 </div>
@@ -696,8 +897,14 @@ export default function App(){
           <div className="card" style={{padding:14}}>
             <div style={{fontSize:14,fontWeight:800,marginBottom:10}}>🗺️ Localização — Brasil inteiro</div>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              <div><label className="lbl">Cidade (qualquer cidade do Brasil)</label><input className="inp" value={pCidade} onChange={e=>{setPCidade(e.target.value);setPDone(false);setPEmps([]);}} placeholder="Ex: Recife, Manaus, Porto Alegre..."/></div>
-              <div><label className="lbl">Bairro (opcional)</label><input className="inp" value={pBairro} onChange={e=>{setPBairro(e.target.value);setPDone(false);setPEmps([]);}} placeholder="Ex: Centro, Boa Viagem..."/></div>
+              <div>
+                <label className="lbl">Cidade (qualquer cidade do Brasil)</label>
+                <input className="inp" value={pCidade} onChange={e=>{setPCidade(e.target.value);setPDone(false);setPEmps([]);}} placeholder="Ex: Recife, Manaus, Goiânia..." list="cidades-br"/>
+                <datalist id="cidades-br">
+                  {["São Paulo","Rio de Janeiro","Brasília","Salvador","Fortaleza","Belo Horizonte","Manaus","Curitiba","Recife","Porto Alegre","Goiânia","Belém","Guarulhos","Campinas","São Luís","São Gonçalo","Maceió","Duque de Caxias","Natal","Campo Grande","Teresina","São Bernardo do Campo","Nova Iguaçu","João Pessoa","Santo André","Osasco","São José dos Campos","Jaboatão dos Guararapes","Ribeirão Preto","Uberlândia","Sorocaba","Contagem","Aracaju","Feira de Santana","Cuiabá","Joinville","Juiz de Fora","Aparecida de Goiânia","Londrina","Ananindeua","Porto Velho","Serra","Caxias do Sul","Macapá","Florianópolis","Mogi das Cruzes","Santos","São José do Rio Preto","Mauá","Betim","Montes Claros","Caruaru","São João de Meriti","Franca","Pelotas","Carapicuíba","Olinda","Campina Grande","Bauru","Blumenau","Vitória","Canoas","Niterói","São Vicente","Diadema","Belford Roxo","Jundiaí","Anápolis","Piracicaba","Cariacica","Caucaia","Vila Velha","Maringá","Moji-Guaçu","Santos Dumont","Ribeirão das Neves","Valparaíso de Goiás","Luziânia","Águas Lindas de Goiás","Senador Canedo","Trindade"].map(c=><option key={c} value={c}/>)}
+                </datalist>
+              </div>
+              <div><label className="lbl">Bairro (opcional)</label><input className="inp" value={pBairro} onChange={e=>{setPBairro(e.target.value);setPDone(false);setPEmps([]);}} placeholder="Ex: Centro, Boa Viagem, Copacabana..."/></div>
             </div>
           </div>
           <div className="card" style={{padding:14}}>
@@ -818,6 +1025,7 @@ export default function App(){
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 <button onClick={()=>setEstoque(p=>p.map(x=>x.id===e.id?{...x,qty:x.qty+1}:x))} style={{width:26,height:26,borderRadius:7,background:"#d1fae5",border:"none",fontSize:14,cursor:"pointer",fontWeight:900,color:"#059669"}}>+</button>
                 <button onClick={()=>setEstoque(p=>p.map(x=>x.id===e.id?{...x,qty:Math.max(0,x.qty-1)}:x))} style={{width:26,height:26,borderRadius:7,background:"#fee2e2",border:"none",fontSize:14,cursor:"pointer",fontWeight:900,color:"#ef4444"}}>-</button>
+                <button onClick={()=>{setEstoque(p=>p.filter(x=>x.id!==e.id));showWarn("Item removido.");}} style={{width:26,height:26,borderRadius:7,background:"#1a1a1a",border:"none",fontSize:11,cursor:"pointer",fontWeight:900,color:"#F5C518"}}>🗑️</button>
               </div>
             </div>
           ))}
@@ -872,7 +1080,7 @@ export default function App(){
                 </div>
               ))}
               <div style={{display:"flex",gap:8,marginTop:8}}>
-                <button className="btn btn-gold" onClick={()=>{setObraAtiva(o.id);setFormComodo({id:uid(),nome:"",tomadas:0,lampadas:0,disjuntores:0,circuitos:0,ar:0,outros:0});setModalComodo(true);}} style={{flex:1,fontSize:12,padding:"10px"}}>+ Cômodo</button>
+                <button className="btn btn-gold" onClick={()=>{setObraAtiva(o.id);setFormComodo({id:uid(),nome:"",tomadas:0,lampadas:0,disjuntores:0,circuitos:0,ar:0,outros:0});setTimeout(()=>setModalComodo(true),50);}} style={{flex:1,fontSize:12,padding:"10px"}}>+ Cômodo</button>
                 <button className="btn btn-g" onClick={()=>gerarOrcamentoObra(o)} style={{flex:1,fontSize:12,padding:"10px"}}>📋 Gerar Orçamento</button>
                 <button className="btn btn-r" onClick={()=>setObras(p=>p.filter(x=>x.id!==o.id))} style={{fontSize:12,padding:"10px"}}>🗑️</button>
               </div>
@@ -882,7 +1090,7 @@ export default function App(){
 
         {/* ── VISITAS TÉCNICAS ── */}
         {tab==="visita"&&<>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={adicionarFoto}/>
+          <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={adicionarFoto}/>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:18,fontWeight:900}}>📷 Visitas Técnicas</div>
             <button className="btn btn-gold" onClick={()=>{setFormVisita({id:uid(),nome:"",data:hoje(),obs:""});setModalVisita(true);}} style={{fontSize:12,padding:"9px 12px"}}>+ Nova Visita</button>
@@ -1156,6 +1364,30 @@ export default function App(){
             <button className="btn btn-gold" onClick={()=>{if(contatos.find(c=>c.id===formCon.id))setContatos(p=>p.map(c=>c.id===formCon.id?formCon:c));else setContatos(p=>[{...formCon,id:formCon.id||uid(),criadoEm:hoje()},...p]);setModalCon(false);showOk("Salvo!");}} style={{width:"100%",fontSize:14,padding:"13px"}}>💾 Salvar</button>
             <button className="btn btn-ghost" onClick={()=>setModalCon(false)} style={{width:"100%",fontSize:12,padding:"11px"}}>Cancelar</button>
           </div>
+        </div>
+      </div>}
+
+      {/* MODAL PDF */}
+      {modalPDF&&osPDF&&<div className="mbg" onClick={()=>setModalPDF(false)}>
+        <div className="mdl" onClick={e=>e.stopPropagation()}>
+          <div className="hdl"/>
+          <div style={{fontSize:16,fontWeight:900,marginBottom:6,color:DARK}}>🖨️ Qual documento gerar?</div>
+          <div style={{fontSize:13,color:"#888",marginBottom:16}}>OS #{osPDF.numero} · {osPDF.clienteNome||"Sem cliente"} · {fmt(osPDF.total)}</div>
+          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+            {[
+              {tipo:"Orçamento",ico:"📋"},
+              {tipo:"Proposta Comercial",ico:"💼"},
+              {tipo:"Ordem de Serviço",ico:"🔧"},
+              {tipo:"Contrato",ico:"📄"},
+              {tipo:"Fatura",ico:"💰"},
+            ].map(({tipo,ico})=>(
+              <button key={tipo} onClick={()=>{gerarDocumento(osPDF,emp,tipo);setModalPDF(false);}} style={{width:"100%",background:"#f8f8f8",border:"1.5px solid #e5e5e5",color:"#333",borderRadius:12,padding:"14px 16px",fontSize:15,fontWeight:700,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:12}}>
+                <span style={{fontSize:22}}>{ico}</span>{tipo}
+                <span style={{marginLeft:"auto",color:"#ccc",fontSize:18}}>›</span>
+              </button>
+            ))}
+          </div>
+          <button className="btn btn-ghost" onClick={()=>setModalPDF(false)} style={{width:"100%",fontSize:13,padding:"12px"}}>Cancelar</button>
         </div>
       </div>}
 
