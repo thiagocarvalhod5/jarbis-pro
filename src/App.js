@@ -20,9 +20,34 @@ const SH = {"apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY,"Content-Type":
 async function dbGet(t,c,v){try{const r=await fetch(`${SUPA_URL}/rest/v1/${t}?${c}=eq.${encodeURIComponent(v)}&select=*`,{headers:SH});return await r.json();}catch{return[];}}
 async function dbIns(t,d){try{const r=await fetch(`${SUPA_URL}/rest/v1/${t}`,{method:"POST",headers:{...SH,"Prefer":"return=representation"},body:JSON.stringify(d)});const j=await r.json();return Array.isArray(j)?j[0]:j;}catch{return null;}}
 async function fazerLogin(email,senha){const rows=await dbGet("usuarios","email",email.toLowerCase().trim());if(!rows||rows.length===0)return{erro:"E-mail não encontrado."};const u=rows[0];if(u.senha!==senha)return{erro:"Senha incorreta."};return{usuario:u};}
-async function fazerCadastro(nome,email,senha){const ex=await dbGet("usuarios","email",email.toLowerCase().trim());if(ex&&ex.length>0)return{erro:"E-mail já cadastrado."};const u=await dbIns("usuarios",{nome,email:email.toLowerCase().trim(),senha,plano:"pro",assinatura_ativa:true});if(!u)return{erro:"Erro ao criar conta."};return{usuario:u};}
+async function fazerCadastro(nome,email,senha){const ex=await dbGet("usuarios","email",email.toLowerCase().trim());if(ex&&ex.length>0)return{erro:"E-mail já cadastrado."};const u=await dbIns("usuarios",{nome,email:email.toLowerCase().trim(),senha,plano:"gratis",assinatura_ativa:false,creditos_prospeccao:5});if(!u)return{erro:"Erro ao criar conta."};return{usuario:u};}
 function loginGoogle(){window.location.href=`${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`;}
 
+// ── ASAAS PAGAMENTO ───────────────────────────────────────────
+const PACOTES=[
+  {creditos:20, valor:27,  label:"Starter",   desc:"20 contatos",  cor:"#10b981"},
+  {creditos:50, valor:47,  label:"Pro",        desc:"50 contatos",  cor:GOLD2},
+  {creditos:200,valor:147, label:"Business",   desc:"200 contatos", cor:"#6366f1"},
+];
+
+async function criarPagamento(email,nome,creditos){
+  try{
+    const r=await fetch("/api/pagar",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({email,nome,creditos})
+    });
+    return await r.json();
+  }catch(e){return{erro:"Erro de conexão: "+e.message};}
+}
+
+async function buscarCreditos(email){
+  try{
+    const rows=await dbGet("usuarios","email",email.toLowerCase().trim());
+    if(rows&&rows.length>0)return Number(rows[0].creditos_prospeccao||0);
+    return 0;
+  }catch{return 0;}
+}
 // ── CASA DOS DADOS (via proxy Vercel) ────────────────────────
 const CNAES={
   arquitetura:["7111100"],engenharia:["7112000"],
@@ -629,6 +654,11 @@ export default function App(){
   const [modalCalc,   setModalCalc]   = useState(false);
   const [modalEst,    setModalEst]    = useState(false);
   const [formEst,     setFormEst]     = useState({id:"",nome:"",qty:0,un:"un",preco:0});
+  const [modalCreditos,setModalCreditos]=useState(false);
+  const [pagandoPacote,setPagandoPacote]=useState(null);
+  const [pagamento,   setPagamento]   = useState(null);
+  const [loadPag,     setLoadPag]     = useState(false);
+  const [creditos,    setCreditos]    = useState(usuario?.creditos_prospeccao||5);
   const [fSN,setFSN]=useState(""); const [fSP,setFSP]=useState("");
   const [pCidade,      setPCidade]      = useState("");
   const [pBairro,      setPBairro]      = useState("");
@@ -767,10 +797,12 @@ export default function App(){
   }
 
   function enviarWA(e){
+    if(creditos<=0){showWarn("Sem créditos! Compre mais para continuar.");setModalCreditos(true);return;}
     const tel=e.tel.replace(/\D/g,"");
     if(!tel){showWarn("Empresa sem telefone.");return;}
     const txt=msgP.replace(/{NOME}/g,emp.nome||"Prótons").replace(/{EMPRESA}/g,e.nome).replace(/{ANOS}/g,"10");
     window.open("https://wa.me/55"+tel+"?text="+encodeURIComponent(txt),"_blank");
+    setCreditos(c=>Math.max(0,c-1));
     setPEmps(p=>p.map(x=>x.id===e.id?{...x,enviado:true}:x));
     setPHist(p=>{const ex=p.find(c=>c.id===e.id);return ex?p:[{...e,enviado:true,em:hoje()},...p];});
     showOk("WhatsApp aberto — "+e.nome);
@@ -924,6 +956,17 @@ export default function App(){
 
         {/* ── PROSPECÇÃO ── */}
         {tab==="prosp"&&<>
+          {/* Banner créditos */}
+          <div style={{background:`linear-gradient(135deg,${DARK},#2a2000)`,borderRadius:16,padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
+            <div style={{fontSize:28}}>📡</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:GOLD,fontWeight:800}}>CRÉDITOS DE PROSPECÇÃO</div>
+              <div style={{fontSize:22,fontWeight:900,color:"#fff"}}>{creditos} contatos disponíveis</div>
+            </div>
+            <button onClick={()=>setModalCreditos(true)} style={{background:`linear-gradient(135deg,${GOLD},${GOLD2})`,border:"none",color:"#1a1a1a",borderRadius:10,padding:"10px 14px",fontSize:13,fontWeight:900,cursor:"pointer",flexShrink:0}}>
+              + Comprar
+            </button>
+          </div>
           <div className="card" style={{padding:14}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div style={{fontSize:14,fontWeight:800}}>✉️ Mensagem</div>
@@ -1402,6 +1445,76 @@ export default function App(){
             <button className="btn btn-gold" onClick={()=>{if(contatos.find(c=>c.id===formCon.id))setContatos(p=>p.map(c=>c.id===formCon.id?formCon:c));else setContatos(p=>[{...formCon,id:formCon.id||uid(),criadoEm:hoje()},...p]);setModalCon(false);showOk("Salvo!");}} style={{width:"100%",fontSize:14,padding:"13px"}}>💾 Salvar</button>
             <button className="btn btn-ghost" onClick={()=>setModalCon(false)} style={{width:"100%",fontSize:12,padding:"11px"}}>Cancelar</button>
           </div>
+        </div>
+      </div>}
+
+      {/* MODAL CRÉDITOS */}
+      {modalCreditos&&<div className="mbg" onClick={()=>{setModalCreditos(false);setPagamento(null);setPagandoPacote(null);}}>
+        <div className="mdl" onClick={e=>e.stopPropagation()}>
+          <div className="hdl"/>
+          <div style={{fontSize:17,fontWeight:900,marginBottom:4,color:DARK}}>📡 Comprar Créditos</div>
+          <div style={{fontSize:13,color:"#888",marginBottom:16}}>Seus créditos: <b style={{color:GOLD2}}>{creditos} contatos</b></div>
+
+          {!pagamento?<>
+            {/* Pacotes */}
+            {PACOTES.map(p=>(
+              <div key={p.creditos} onClick={()=>setPagandoPacote(p)} style={{background:pagandoPacote?.creditos===p.creditos?"#fef9c3":"#f8f8f8",border:`2px solid ${pagandoPacote?.creditos===p.creditos?GOLD:"#e5e5e5"}`,borderRadius:14,padding:"14px 16px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:14,transition:"all .2s"}}>
+                <div style={{width:46,height:46,borderRadius:12,background:p.cor+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>📡</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:15,fontWeight:900,color:DARK}}>{p.label} — {p.desc}</div>
+                  <div style={{fontSize:13,color:"#888"}}>Envie WhatsApp para {p.creditos} empresas reais</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:18,fontWeight:900,color:p.cor}}>R${p.valor}</div>
+                  <div style={{fontSize:10,color:"#aaa"}}>por crédito</div>
+                </div>
+              </div>
+            ))}
+
+            {pagandoPacote&&<>
+              <div style={{background:"#fef9c3",border:`1px solid ${GOLD}`,borderRadius:12,padding:"12px 14px",marginBottom:12,fontSize:13,color:"#666",lineHeight:1.6}}>
+                ✅ <b>{pagandoPacote.desc}</b> por <b style={{color:GOLD2}}>R${pagandoPacote.valor}</b><br/>
+                Pagamento via <b>PIX</b> — liberação automática após confirmação
+              </div>
+              <button className="btn btn-gold" onClick={async()=>{
+                setLoadPag(true);
+                const res=await criarPagamento(usuario.email,usuario.nome,pagandoPacote.creditos);
+                setLoadPag(false);
+                if(res.erro){showWarn(res.erro);return;}
+                setPagamento(res);
+              }} style={{width:"100%",fontSize:15,padding:"14px",marginBottom:8}} disabled={loadPag}>
+                {loadPag?"⟳ Gerando PIX...":"⚡ Gerar PIX"}
+              </button>
+            </>}
+            <button className="btn btn-ghost" onClick={()=>setModalCreditos(false)} style={{width:"100%",fontSize:13,padding:"12px"}}>Cancelar</button>
+
+          </>:<>
+            {/* QR Code PIX */}
+            <div style={{textAlign:"center",marginBottom:16}}>
+              <div style={{fontSize:14,fontWeight:800,color:DARK,marginBottom:8}}>📱 Escaneie o QR Code PIX</div>
+              {pagamento.pix_qrcode&&<img src={"data:image/png;base64,"+pagamento.pix_qrcode} alt="QR Code PIX" style={{width:200,height:200,borderRadius:12,border:`2px solid ${GOLD}`,margin:"0 auto 12px",display:"block"}}/>}
+              <div style={{fontSize:13,color:"#888",marginBottom:8}}>ou copie o código abaixo</div>
+              <div style={{background:"#f8f8f8",border:"1.5px solid #e5e5e5",borderRadius:10,padding:"10px 12px",fontSize:11,color:"#333",wordBreak:"break-all",marginBottom:10,textAlign:"left"}}>{pagamento.pix_copia_cola}</div>
+              <button onClick={()=>{navigator.clipboard?.writeText(pagamento.pix_copia_cola);showOk("Código copiado!");}} className="btn btn-dark" style={{width:"100%",fontSize:14,padding:"12px",marginBottom:8}}>
+                📋 Copiar código PIX
+              </button>
+              <div style={{background:"#d1fae5",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#059669",fontWeight:700,marginBottom:10}}>
+                ✅ Após o pagamento seus créditos serão liberados automaticamente!
+              </div>
+              <div style={{fontSize:12,color:"#888",marginBottom:10}}>
+                Valor: <b>R${pagamento.valor}</b> · {pagamento.creditos} créditos
+              </div>
+            </div>
+            <button className="btn btn-gold" onClick={async()=>{
+              const novos=await buscarCreditos(usuario.email);
+              setCreditos(novos);
+              if(novos>creditos){showOk("Créditos liberados! +"+pagandoPacote?.creditos);setModalCreditos(false);setPagamento(null);}
+              else showWarn("Pagamento ainda não confirmado. Aguarde alguns instantes.");
+            }} style={{width:"100%",fontSize:14,padding:"13px",marginBottom:8}}>
+              🔄 Verificar pagamento
+            </button>
+            <button className="btn btn-ghost" onClick={()=>{setModalCreditos(false);setPagamento(null);setPagandoPacote(null);}} style={{width:"100%",fontSize:12,padding:"11px"}}>Fechar</button>
+          </>}
         </div>
       </div>}
 
