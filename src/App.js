@@ -34,10 +34,13 @@ const CNAES={
 
 async function buscarEmpresas(municipio, bairro, seg){
   try{
+    // Remove acentos para a API
+    const norm=s=>s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+
     const body={
-      municipio:[municipio.toLowerCase()],
+      municipio:[norm(municipio)],
       codigo_atividade_principal:CNAES[seg]||["7111100"],
-      ...(bairro?{bairro:[bairro.toLowerCase()]}:{})
+      ...(bairro&&bairro.trim()?{bairro:[norm(bairro)]}:{})
     };
 
     const r=await fetch("/api/buscar",{
@@ -713,26 +716,37 @@ export default function App(){
 
       const lista=res.lista||[];
 
-      // Mapeia campos da API v5 Casa dos Dados
-      // v5 retorna: cnpj, razao_social, nome_fantasia, ddd_telefone_1, ddd_telefone_2
-      // logradouro, numero, complemento, bairro, municipio, uf, cep
-      let emps=lista.map(e=>({
-        id:e.cnpj||uid(),
-        nome:(e.razao_social||e.nome_fantasia||"Empresa").trim(),
-        cnpj:e.cnpj||"",
-        tel:e.ddd_telefone_1
-          ?"("+e.ddd_telefone_1.toString().slice(0,2)+") "+e.ddd_telefone_1.toString().slice(2)
-          :e.ddd_telefone_2
-            ?"("+e.ddd_telefone_2.toString().slice(0,2)+") "+e.ddd_telefone_2.toString().slice(2)
-            :e.ddd1&&e.telefone1
-              ?"("+e.ddd1+") "+e.telefone1
-              :"",
-        email:e.email||"",
-        endereco:[e.logradouro,e.numero,e.complemento,e.bairro,e.municipio,e.uf].filter(Boolean).join(", "),
-        segmento:pSeg,
-        porte:e.porte||e.descricao_porte||"",
-        enviado:false,
-      })).filter(e=>e.tel.replace(/\D/g,"").length>=8);
+      // Mapeamento correto campos v5 Casa dos Dados
+      let emps=lista.map(e=>{
+        // Telefone pode vir em campos variados dependendo do tipo_resultado
+        const end=e.endereco||{};
+        const tel=e.ddd_telefone_1
+          ?"("+String(e.ddd_telefone_1).slice(0,2)+") "+String(e.ddd_telefone_1).slice(2)
+          :e.telefone1
+            ?e.ddd1?"("+e.ddd1+") "+e.telefone1:e.telefone1
+            :e.contato?.telefone1||"";
+
+        return {
+          id:e.cnpj||uid(),
+          nome:(e.razao_social||e.nome_fantasia||"Empresa").trim(),
+          cnpj:e.cnpj||"",
+          tel,
+          email:e.email||e.contato?.email||"",
+          endereco:[
+            end.tipo_logradouro,end.logradouro,end.numero,
+            end.complemento,end.bairro,end.municipio,end.uf
+          ].filter(Boolean).join(", "),
+          municipio:end.municipio||"",
+          porte:e.porte_empresa?.descricao||e.porte||"",
+          segmento:pSeg,
+          enviado:false,
+        };
+      }).filter(e=>{
+        const nums=e.tel.replace(/\D/g,"");
+        // Celular brasileiro: 11 dígitos com 9 na frente (ex: 11 9XXXX-XXXX)
+        // ou 10 dígitos sem o 9 mas ainda válido para WhatsApp
+        return nums.length>=10&&nums.length<=11;
+      });
 
       setPEmps(emps);
       setPDone(true);
