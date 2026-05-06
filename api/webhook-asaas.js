@@ -1,9 +1,135 @@
 // api/webhook-asaas.js
 // Recebe confirmação de pagamento do Asaas e libera créditos no Supabase
 
-const SUPA_URL = "https://hrqhqqakvkdkapfijhij.supabase.co";
-const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhycWhxcWFrdmtka2FwZmlqaGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwMDc1OTYsImV4cCI6MjA5MzU4MzU5Nn0.5YM_CUIuaSmb4lZngDXqJdEuPbGF53F5Qc9nbXLkk2k";
-const WEBHOOK_TOKEN = "whsec_uEPqB"; // Token do Asaas
+const SUPA_URL  = "https://hrqhqqakvkdkapfijhij.supabase.co";
+const SUPA_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhycWhxcWFrdmtka2FwZmlqaGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwMDc1OTYsImV4cCI6MjA5MzU4MzU5Nn0.5YM_CUIuaSmb4lZngDXqJdEuPbGF53F5Qc9nbXLkk2k";
+
+const SH = {
+  apikey: SUPA_KEY,
+  Authorization: "Bearer " + SUPA_KEY,
+  "Content-Type": "application/json",
+};
+
+// Créditos por valor pago
+function creditosPorValor(valor) {
+  const v = Number(valor);
+  if (v >= 147) return 200;
+  if (v >= 47)  return 50;
+  if (v >= 27)  return 20;
+  return 0;
+}
+
+async function dbGet(table, col, val) {
+  const r = await fetch(
+    `${SUPA_URL}/rest/v1/${table}?${col}=eq.${encodeURIComponent(val)}&select=*`,
+    { headers: SH }
+  );
+  return r.json();
+}
+
+async function dbUpdate(table, col, val, data) {
+  return fetch(
+    `${SUPA_URL}/rest/v1/${table}?${col}=eq.${encodeURIComponent(val)}`,
+    { method: "PATCH", headers: { ...SH, Prefer: "return=representation" }, body: JSON.stringify(data) }
+  );
+}
+
+async function dbInsert(table, data) {
+  return fetch(
+    `${SUPA_URL}/rest/v1/${table}`,
+    { method: "POST", headers: { ...SH, Prefer: "return=representation" }, body: JSON.stringify(data) }
+  );
+}
+
+export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, asaas-access-token");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST")    return res.status(405).json({ erro: "Método não permitido" });
+
+  try {
+    const evento   = req.body;
+    const event    = evento?.event || "";
+    const pagamento = evento?.payment || {};
+
+    console.log("Webhook recebido:", event, "| Status:", pagamento.status, "| Valor:", pagamento.value);
+
+    // Só processa pagamentos confirmados/recebidos
+    if (!["PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"].includes(event)) {
+      return res.status(200).json({ ok: true, msg: "Evento ignorado: " + event });
+    }
+
+    const valor    = Number(pagamento.value || pagamento.netValue || 0);
+    const creditos = creditosPorValor(valor);
+
+    if (creditos === 0) {
+      console.warn("Valor sem pacote correspondente:", valor);
+      return res.status(200).json({ ok: true, msg: "Valor R$" + valor + " não corresponde a pacote" });
+    }
+
+    // Email do cliente (externalReference = email cadastrado no app)
+    const email = (pagamento.externalReference || "").toLowerCase().trim();
+
+    if (!email || !email.includes("@")) {
+      // Registra para revisão manual
+      await dbInsert("pagamentos", {
+        asaas_id: pagamento.id,
+        valor, creditos,
+        status: "pendente_vinculo",
+        referencia: pagamento.externalReference || "",
+        criado_em: new Date().toISOString(),
+      });
+      return res.status(200).json({ ok: true, msg: "Email não identificado — registrado para revisão" });
+    }
+
+    // Busca usuário
+    const usuarios = await dbGet("usuarios", "email", email);
+    if (!usuarios?.length) {
+      console.warn("Usuário não encontrado:", email);
+      return res.status(200).json({ ok: true, msg: "Usuário não encontrado: " + email });
+    }
+
+    const usuario        = usuarios[0];
+    const creditosAtual  = Number(usuario.creditos_prospeccao || 0);
+    const creditosNovo   = creditosAtual + creditos;
+
+    // Atualiza créditos + ativa plano PRO
+    await dbUpdate("usuarios", "email", email, {
+      creditos_prospeccao: creditosNovo,
+      plano: "pro",
+      assinatura_ativa: true,
+      atualizado_em: new Date().toISOString(),
+    });
+
+    // Registra pagamento
+    await dbInsert("pagamentos", {
+      usuario_id:       usuario.id,
+      asaas_id:         pagamento.id,
+      email,
+      valor,
+      creditos,
+      creditos_anterior: creditosAtual,
+      creditos_novo:     creditosNovo,
+      status:           "pago",
+      criado_em:        new Date().toISOString(),
+    });
+
+    console.log(`✅ ${email} | +${creditos} créditos | Total: ${creditosNovo}`);
+    return res.status(200).json({
+      ok: true,
+      email,
+      creditos_adicionados: creditos,
+      creditos_total: creditosNovo,
+    });
+
+  } catch (erro) {
+    console.error("Erro webhook:", erro.message);
+    return res.status(500).json({ erro: "Erro interno", detalhe: erro.message });
+  }
+}
+
 
 // Pacotes de créditos por valor
 function creditosPorValor(valor) {
