@@ -15,8 +15,9 @@ export default async function handler(req, res) {
       municipio: municipio || [],
       ...(bairro && bairro.length > 0 ? { bairro } : {}),
       mais_filtros: {
-        com_telefone: true,
-        somente_celular: true,   // apenas celular = WhatsApp
+        com_telefone: true,      // tem telefone (fixo ou celular)
+        somente_celular: false,  // aceita fixo também
+        somente_fixo: false,
         somente_matriz: true,
         excluir_email_contab: true
       },
@@ -37,6 +38,7 @@ export default async function handler(req, res) {
     );
 
     const data = await resposta.json();
+    console.log("Casa dos Dados status:", resposta.status, "total:", data?.total);
     return res.status(200).json(data);
 
   } catch (erro) {
