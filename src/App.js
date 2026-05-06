@@ -53,10 +53,8 @@ async function buscarEmpresas(municipio, bairro, seg){
     }
 
     const data=await r.json();
-    console.log("Resposta API:", JSON.stringify(data).slice(0,300));
-
-    // A API v2 retorna { data: { cnpj: [...] } } ou { cnpj: [...] }
-    const lista=data?.data?.cnpj||data?.cnpj||data?.data||data?.estabelecimentos||data?.empresas||[];
+    // API v2 retorna { data: { cnpj: [...] } }
+    const lista=data?.data?.cnpj||data?.cnpj||[];
     return{lista};
   }catch(e){
     console.error("Erro busca:",e);
@@ -720,17 +718,13 @@ export default function App(){
         id:e.cnpj||uid(),
         nome:(e.razao_social||e.nome_fantasia||"Empresa").trim(),
         cnpj:e.cnpj||"",
-        tel:e.ddd_telefone_1?(
-          "("+e.ddd_telefone_1.slice(0,2)+") "+e.ddd_telefone_1.slice(2)
-        ):e.telefone1?(
-          e.ddd1?"("+e.ddd1+") "+e.telefone1:e.telefone1
-        ):"",
+        tel:e.ddd_telefone_1
+          ?"("+e.ddd_telefone_1.slice(0,2)+") "+e.ddd_telefone_1.slice(2)
+          :e.ddd1&&e.telefone1
+            ?"("+e.ddd1+") "+e.telefone1
+            :"",
         email:e.email||"",
-        endereco:[
-          e.logradouro||(e.descricao_tipo_logradouro+" "+e.logradouro),
-          e.numero,e.complemento,e.bairro||(e.nome_cidade||""),
-          e.municipio||(e.nome_municipio||""),e.uf
-        ].filter(Boolean).join(", "),
+        endereco:[e.logradouro,e.numero,e.complemento,e.bairro,e.municipio||e.nome_municipio,e.uf].filter(Boolean).join(", "),
         segmento:pSeg,
         porte:e.porte||e.descricao_porte||"",
         enviado:false,
